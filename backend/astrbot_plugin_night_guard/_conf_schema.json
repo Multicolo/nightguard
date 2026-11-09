@@ -1,0 +1,92 @@
+{
+  "api_token": {
+    "description": "APP 调用口令（留空则自动生成，见容器日志或 plugin_data/astrbot_plugin_night_guard/token.txt）",
+    "type": "string",
+    "default": ""
+  },
+  "http_port": {
+    "description": "守夜后端端口（容器内）",
+    "type": "int",
+    "default": 6200
+  },
+  "use_astrbot_persona": {
+    "description": "读取 AstrBot 默认人设（关掉就用内置的通用守夜人人设）",
+    "type": "bool",
+    "default": true
+  },
+  "persona_name": {
+    "description": "角色显示名（留空则用 AstrBot 人设名；再没有就叫「守夜人」）",
+    "type": "string",
+    "default": ""
+  },
+  "owner_umo": {
+    "description": "主人会话 umo（用于同步 QQ 记忆，可留空）",
+    "type": "string",
+    "default": ""
+  },
+  "llm_provider_id": {
+    "description": "对话模型 ID（留空自动选）",
+    "type": "string",
+    "default": ""
+  },
+  "bedtime_start": {
+    "description": "默认开始时间",
+    "type": "string",
+    "default": "23:30"
+  },
+  "bedtime_end": {
+    "description": "默认结束时间",
+    "type": "string",
+    "default": "06:30"
+  },
+  "allow_chance": {
+    "description": "求情放行概率（0~1）",
+    "type": "float",
+    "default": 0.45
+  },
+  "allow_minutes": {
+    "description": "放行分钟数（会夹到 2~5）",
+    "type": "int",
+    "default": 3
+  },
+  "llm_timeout": {
+    "description": "模型超时秒数",
+    "type": "int",
+    "default": 60
+  },
+  "enable_sleep_photo": {
+    "description": "允许生成「准备睡觉」的照片（需要生图服务商）",
+    "type": "bool",
+    "default": true
+  },
+  "image_size": {
+    "description": "睡照尺寸",
+    "type": "string",
+    "default": "896*1152"
+  },
+  "character_forms_dir": {
+    "description": "角色三视图目录（可选，留空则生成普通人物；需含 {mature,chibi,winter}/{front,side,back}.png）",
+    "type": "string",
+    "default": ""
+  },
+  "character_look": {
+    "description": "角色外貌描述（可选，用于生图提示词）",
+    "type": "string",
+    "default": ""
+  },
+  "bg_image": {
+    "description": "聊天框默认背景图路径（留空则 APP 用内置渐变）",
+    "type": "string",
+    "default": ""
+  },
+  "ended_line": {
+    "description": "会话结束后固定回复",
+    "type": "string",
+    "default": "……不理你了。睡觉。"
+  },
+  "fallback_line": {
+    "description": "模型不可用时的兜底话",
+    "type": "string",
+    "default": "哼，这么晚了还不睡？手机给我放下。"
+  }
+}

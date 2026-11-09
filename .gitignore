@@ -1,0 +1,24 @@
+# 构建产物
+android/build/
+android/dist/
+*.apk
+
+# 签名文件（自己生成，别提交）
+*.jks
+*.keystore
+
+# Python
+__pycache__/
+*.pyc
+
+# 运行时数据
+plugin_data/
+state.json
+token.txt
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

@@ -1,0 +1,6 @@
+name: astrbot_plugin_night_guard
+display_name: 守夜人 NightGuard
+desc: 深夜把手机盖成关不掉的聊天贴图，只能跟角色求情；一晚只放行一次，可发准备睡觉的照片，聊久了会自己结束会话。人设读取 AstrBot 默认人设，也可以关掉用通用人设。
+version: v1.0.0
+author: NightGuard contributors
+repo: ""
