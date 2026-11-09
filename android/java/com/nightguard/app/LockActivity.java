@@ -16,12 +16,10 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -36,7 +34,10 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 
-/** 盖在最上层、关不掉的守夜聊天框。 */
+/**
+ * 盖在最上层、关不掉的守夜聊天框。
+ * 竖屏是「头像 + 聊天流 + 输入条」；平板/横屏自动切成左边角色、右边聊天的双栏。
+ */
 public class LockActivity extends Activity {
     private static volatile boolean ALIVE = false;
     private static LockActivity INSTANCE;
@@ -44,15 +45,24 @@ public class LockActivity extends Activity {
 
     private FrameLayout root;
     private ImageView bg;
-    private LinearLayout msgList;
     private ScrollView scroll;
+    private LinearLayout msgList;
     private EditText input;
-    private Button send;
-    private TextView hint;
+    private TextView send;
+    private LinearLayout inputRow;
+    private LinearLayout hintPill;
+    private TextView hintText;
     private TextView clock;
+    private TextView nameView;
+    private TextView statusChip;
+    private View typing;
+    private Runnable typingTick;
+
     private String persona = Cfg.DEFAULT_PERSONA;
     private boolean ended;
     private boolean busy;
+    private boolean wide;
+    private boolean photoShown;
 
     public static boolean alive() { return ALIVE; }
 
@@ -69,6 +79,8 @@ public class LockActivity extends Activity {
         INSTANCE = this;
         ALIVE = true;
         persona = Cfg.persona(this);
+        ended = Cfg.endedTonight(this);
+        wide = Ui.isWide(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(true);
@@ -77,12 +89,11 @@ public class LockActivity extends Activity {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                     | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         }
-        ended = Cfg.endedTonight(this);
         setContentView(build());
         loadHistory();
         loadBackground();
         hideBars();
-        refreshHint();
+        refreshState();
         applyPrefill(getIntent());
     }
 
@@ -92,7 +103,6 @@ public class LockActivity extends Activity {
         applyPrefill(it);
     }
 
-    /** 调试用：am start ... --es nightsay "中文" 可直接填进输入框。 */
     private void applyPrefill(Intent it) {
         if (it == null) return;
         String s = it.getStringExtra("nightsay");
@@ -116,12 +126,19 @@ public class LockActivity extends Activity {
 
     @Override protected void onDestroy() {
         ALIVE = false;
+        if (typingTick != null) UI.removeCallbacks(typingTick);
         if (INSTANCE == this) INSTANCE = null;
         super.onDestroy();
     }
 
     @Override public void onBackPressed() {
         Toast.makeText(this, "别想跑，去睡觉。", Toast.LENGTH_SHORT).show();
+    }
+
+    /** 竖屏 ⇄ 平板/横屏：宽度档位变了就重建，让布局换成单列或双栏。 */
+    @Override public void onConfigurationChanged(android.content.res.Configuration cfg) {
+        super.onConfigurationChanged(cfg);
+        if (Ui.isWide(this) != wide) recreate();
     }
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
@@ -132,108 +149,217 @@ public class LockActivity extends Activity {
         return super.onKeyDown(keyCode, event);
     }
 
-    // ------------------------------------------------------------------ UI
+    // ------------------------------------------------------------------ 布局
     private View build() {
-        int pad = dp(16);
         root = new FrameLayout(this);
-        GradientDrawable fallback = new GradientDrawable(GradientDrawable.Orientation.TR_BL,
-                new int[]{0xFF10131A, 0xFF1A2030, 0xFF0B0F14});
-        root.setBackground(fallback);
+        root.setBackgroundColor(Ui.BG);
 
         bg = new ImageView(this);
         bg.setScaleType(ImageView.ScaleType.CENTER_CROP);
         root.addView(bg, new FrameLayout.LayoutParams(-1, -1));
 
         View scrim = new View(this);
-        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x55060A10, 0x99080C12, 0xE6070A0F});
-        scrim.setBackground(g);
+        scrim.setBackground(Ui.gradient(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xB3070A10, 0x4D070A10, 0x80070A10, 0xF2070A10}));
         root.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
 
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(pad, pad, pad, pad);
-        root.addView(col, new FrameLayout.LayoutParams(-1, -1));
+        if (Ui.isWide(this)) {
+            View side = new View(this);
+            side.setBackground(Ui.gradient(GradientDrawable.Orientation.LEFT_RIGHT,
+                    new int[]{0xE60A0D12, 0xB30A0D12, 0x000A0D12}));
+            root.addView(side, new FrameLayout.LayoutParams(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.42f), -1));
+        }
 
-        // 顶部：头像 + 标题 + 时间
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        int pad = Ui.dp(this, wide ? 28 : 0);
+        content.setPadding(pad, pad, pad, pad);
+        root.addView(content, new FrameLayout.LayoutParams(-1, -1));
+
+        if (wide) {
+            content.addView(buildProfilePanel(), new LinearLayout.LayoutParams(0, -1, 0.38f));
+            View div = new View(this);
+            div.setBackgroundColor(0x1AFFFFFF);
+            content.addView(div, new LinearLayout.LayoutParams(Ui.dp(this, 1), -1));
+            content.addView(buildChatColumn(true), new LinearLayout.LayoutParams(0, -1, 0.62f));
+        } else {
+            content.addView(buildHeader(), new LinearLayout.LayoutParams(-1, -2));
+            content.addView(buildChatColumn(false), new LinearLayout.LayoutParams(-1, 0, 1f));
+        }
+        return root;
+    }
+
+    private View avatarView(int sizeDp) {
+        FrameLayout holder = new FrameLayout(this);
+        GradientDrawable ring = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFFFF9EC4, 0xFF8E6CF0});
+        ring.setShape(GradientDrawable.OVAL);
+        holder.setBackground(ring);
+        holder.setClipToOutline(true);
+
+        ImageView iv = new ImageView(this);
+        iv.setImageResource(R.mipmap.ic_launcher);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        holder.addView(iv, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+        int inset = Ui.dp(this, 3);
+        holder.setPadding(inset, inset, inset, inset);
+        holder.setOnLongClickListener(backdoor());
+        holder.setLayoutParams(new FrameLayout.LayoutParams(Ui.dp(this, sizeDp), Ui.dp(this, sizeDp)));
+        return holder;
+    }
+
+    private View buildHeader() {
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(Ui.dp(this, 18), Ui.dp(this, 16), Ui.dp(this, 18), Ui.dp(this, 10));
 
-        ImageView avatar = new ImageView(this);
-        avatar.setImageResource(R.mipmap.ic_launcher);
-        GradientDrawable ring = new GradientDrawable();
-        ring.setShape(GradientDrawable.OVAL);
-        ring.setColor(0x33FFFFFF);
-        avatar.setBackground(ring);
-        avatar.setClipToOutline(true);
-        head.addView(avatar, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        head.addView(avatarView(44));
 
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        titles.setPadding(dp(10), 0, 0, 0);
-        TextView name = new TextView(this);
-        name.setText(persona);
-        name.setTextColor(0xFFFFFFFF);
-        name.setTextSize(17);
-        name.setTypeface(Typeface.DEFAULT_BOLD);
-        TextView sub = new TextView(this);
-        sub.setText("守夜中 · " + Cfg.formatMin(Cfg.startMin(this)) + "–" + Cfg.formatMin(Cfg.endMin(this)));
-        sub.setTextColor(0xFFFF9EC4);
-        sub.setTextSize(12);
-        titles.addView(name);
-        titles.addView(sub);
-        // 隐藏后门：长按头像/标题进设置页（不然会话结束后手机没法退出守夜）
-        View.OnLongClickListener backdoor = new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) {
-                Toast.makeText(LockActivity.this, "别告诉她……", Toast.LENGTH_SHORT).show();
-                startActivity(new Intent(LockActivity.this, MainActivity.class)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return true;
-            }
-        };
-        avatar.setOnLongClickListener(backdoor);
-        titles.setOnLongClickListener(backdoor);
+        titles.setPadding(Ui.dp(this, 12), 0, 0, 0);
+        titles.setOnLongClickListener(backdoor());
+
+        nameView = new TextView(this);
+        nameView.setText(persona);
+        nameView.setTextColor(Ui.TEXT);
+        nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        nameView.setTypeface(Typeface.DEFAULT_BOLD);
+        nameView.setOnLongClickListener(backdoor());
+
+        statusChip = statusText(11);
+        statusChip.setPadding(0, Ui.dp(this, 3), 0, 0);
+
+        titles.addView(nameView);
+        titles.addView(statusChip);
         head.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
 
         clock = new TextView(this);
-        clock.setTextColor(0xCCFFFFFF);
-        clock.setTextSize(14);
+        clock.setTextColor(Ui.TEXT_DIM);
+        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        clock.setTypeface(Typeface.MONOSPACE);
         head.addView(clock);
-        col.addView(head);
+        return head;
+    }
 
-        hint = new TextView(this);
-        hint.setTextColor(0xAAFFFFFF);
-        hint.setTextSize(12);
-        hint.setPadding(0, dp(8), 0, dp(6));
-        col.addView(hint);
+    private View buildProfilePanel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER_HORIZONTAL);
+        panel.setPadding(Ui.dp(this, 10), Ui.dp(this, 40), Ui.dp(this, 10), Ui.dp(this, 28));
+
+        panel.addView(avatarView(112));
+
+        nameView = new TextView(this);
+        nameView.setText(persona);
+        nameView.setTextColor(Ui.TEXT);
+        nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
+        nameView.setTypeface(Typeface.DEFAULT_BOLD);
+        nameView.setGravity(Gravity.CENTER);
+        nameView.setPadding(0, Ui.dp(this, 18), 0, 0);
+        nameView.setOnLongClickListener(backdoor());
+        panel.addView(nameView);
+
+        TextView sub = new TextView(this);
+        sub.setText("守夜中 · " + Cfg.formatMin(Cfg.startMin(this)) + " – " + Cfg.formatMin(Cfg.endMin(this)));
+        sub.setTextColor(Ui.ACCENT);
+        sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, Ui.dp(this, 6), 0, 0);
+        panel.addView(sub);
+
+        View line = new View(this);
+        line.setBackgroundColor(0x1FFFFFFF);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 1));
+        llp.topMargin = Ui.dp(this, 26);
+        panel.addView(line, llp);
+
+        statusChip = statusText(13);
+        statusChip.setGravity(Gravity.CENTER);
+        statusChip.setPadding(0, Ui.dp(this, 22), 0, 0);
+        panel.addView(statusChip);
+
+        TextView tip = new TextView(this);
+        tip.setText("再求也没用的时候，就真的该睡了。");
+        tip.setTextColor(Ui.TEXT_FAINT);
+        tip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tip.setGravity(Gravity.CENTER);
+        tip.setPadding(0, Ui.dp(this, 14), 0, 0);
+        panel.addView(tip);
+
+        clock = new TextView(this);
+        clock.setTextColor(0x4DFFFFFF);
+        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 56);
+        clock.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+        clock.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
+        clp.topMargin = Ui.dp(this, 22);
+        panel.addView(clock, clp);
+        return panel;
+    }
+
+    private View buildChatColumn(boolean inWide) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(Ui.dp(this, inWide ? 24 : 14),
+                Ui.dp(this, inWide ? 10 : 0),
+                Ui.dp(this, inWide ? 24 : 14),
+                Ui.dp(this, inWide ? 14 : 8));
 
         scroll = new ScrollView(this);
         scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(false);
         msgList = new LinearLayout(this);
         msgList.setOrientation(LinearLayout.VERTICAL);
-        msgList.setPadding(0, dp(6), 0, dp(6));
+        msgList.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 8));
         scroll.addView(msgList, new ScrollView.LayoutParams(-1, -2));
         col.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        hintPill = new LinearLayout(this);
+        hintPill.setOrientation(LinearLayout.HORIZONTAL);
+        hintPill.setGravity(Gravity.CENTER);
+        hintPill.setPadding(Ui.dp(this, 12), Ui.dp(this, 6), Ui.dp(this, 14), Ui.dp(this, 6));
+        hintPill.setBackground(Ui.roundStroke(this, 0x66101620, 20, 0x1FFFFFFF, 0.8f));
+
+        View dot = new View(this);
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.OVAL);
+        d.setColor(Ui.ACCENT);
+        dot.setBackground(d);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(Ui.dp(this, 6), Ui.dp(this, 6));
+        dlp.rightMargin = Ui.dp(this, 8);
+        hintPill.addView(dot, dlp);
+
+        hintText = new TextView(this);
+        hintText.setTextColor(Ui.TEXT_DIM);
+        hintText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        hintPill.addView(hintText);
+
+        LinearLayout hintWrap = new LinearLayout(this);
+        hintWrap.setGravity(Gravity.CENTER);
+        hintWrap.setPadding(0, Ui.dp(this, 4), 0, Ui.dp(this, 8));
+        hintWrap.addView(hintPill);
+        col.addView(hintWrap, new LinearLayout.LayoutParams(-1, -2));
+
+        inputRow = new LinearLayout(this);
+        inputRow.setOrientation(LinearLayout.HORIZONTAL);
+        inputRow.setGravity(Gravity.CENTER_VERTICAL);
+        inputRow.setBackground(Ui.roundStroke(this, 0xEE141A24, 26, 0x1FFFFFFF, 0.8f));
+        inputRow.setPadding(Ui.dp(this, 6), Ui.dp(this, 5), Ui.dp(this, 6), Ui.dp(this, 5));
 
         input = new EditText(this);
         input.setHint("跟" + persona + "说点什么…");
-        input.setHintTextColor(0x88FFFFFF);
-        input.setTextColor(0xFFFFFFFF);
-        input.setTextSize(15);
+        input.setHintTextColor(0x5FFFFFFF);
+        input.setTextColor(Ui.TEXT);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         input.setSingleLine(false);
         input.setMaxLines(3);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND);
-        GradientDrawable inBg = new GradientDrawable();
-        inBg.setColor(0x33FFFFFF);
-        inBg.setCornerRadius(dp(22));
-        input.setBackground(inBg);
-        input.setPadding(dp(14), dp(10), dp(14), dp(10));
+        input.setBackgroundColor(0x00000000);
+        input.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8));
         input.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override public boolean onEditorAction(TextView v, int actionId, KeyEvent e) {
                 if (actionId == EditorInfo.IME_ACTION_SEND) {
@@ -243,30 +369,42 @@ public class LockActivity extends Activity {
                 return false;
             }
         });
-        row.addView(input, new LinearLayout.LayoutParams(0, -2, 1f));
+        inputRow.addView(input, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        send = new Button(this);
-        send.setText("发送");
-        send.setAllCaps(false);
+        send = new TextView(this);
+        send.setText("↑");
         send.setTextColor(0xFFFFFFFF);
-        send.setTextSize(14);
-        GradientDrawable btnBg = new GradientDrawable();
-        btnBg.setColor(0xFFFF6FA5);
-        btnBg.setCornerRadius(dp(22));
-        send.setBackground(btnBg);
-        send.setPadding(dp(16), dp(8), dp(16), dp(8));
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-2, -2);
-        blp.leftMargin = dp(8);
+        send.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
+        send.setTypeface(Typeface.DEFAULT_BOLD);
+        send.setGravity(Gravity.CENTER);
+        send.setBackground(Ui.rippleGradient(this, 0xFFFF8DB4, Ui.ACCENT_DARK, 22));
         send.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { send(); }
         });
-        row.addView(send, blp);
-        col.addView(row);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(Ui.dp(this, 44), Ui.dp(this, 44));
+        blp.leftMargin = Ui.dp(this, 4);
+        inputRow.addView(send, blp);
 
-        root.setOnTouchListener(new View.OnTouchListener() {
-            @Override public boolean onTouch(View v, MotionEvent e) { return false; }
-        });
-        return root;
+        col.addView(inputRow, new LinearLayout.LayoutParams(-1, -2));
+        return col;
+    }
+
+    private TextView statusText(int sp) {
+        TextView t = new TextView(this);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextColor(Ui.TEXT_DIM);
+        return t;
+    }
+
+    private View.OnLongClickListener backdoor() {
+        return new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                Toast.makeText(LockActivity.this, "别告诉她……", Toast.LENGTH_SHORT).show();
+                startActivity(new Intent(LockActivity.this, MainActivity.class)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return true;
+            }
+        };
     }
 
     private void hideBars() {
@@ -279,104 +417,147 @@ public class LockActivity extends Activity {
                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
-    private int dp(float v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
-    }
-
-    // ------------------------------------------------------------------ 消息渲染
+    // ------------------------------------------------------------------ 消息
     private void addMsg(String role, String text) {
+        boolean me = "user".equals(role);
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.HORIZONTAL);
-        wrap.setGravity("user".equals(role) ? Gravity.END : Gravity.START);
-        wrap.setPadding(0, dp(4), 0, dp(4));
+        wrap.setGravity(me ? Gravity.END : Gravity.START);
+        wrap.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 5));
 
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(15);
-        tv.setTextColor("user".equals(role) ? 0xFFFFFFFF : 0xFFEDEFF5);
-        tv.setLineSpacing(dp(2), 1f);
-        tv.setPadding(dp(14), dp(10), dp(14), dp(10));
-        GradientDrawable b = new GradientDrawable();
-        b.setCornerRadius(dp(18));
-        b.setColor("user".equals(role) ? 0xFF3A6DF0 : 0xE6272E3C);
-        tv.setBackground(b);
-        int max = (int) (getResources().getDisplayMetrics().widthPixels * 0.76);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        tv.setTextColor(me ? 0xFFFFFFFF : 0xFFEDEFF5);
+        tv.setLineSpacing(Ui.dp(this, 3), 1f);
+        tv.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 14), Ui.dp(this, 10));
+        tv.setBackground(Ui.bubble(this, me));
+        int max = (int) (getResources().getDisplayMetrics().widthPixels * (wide ? 0.4 : 0.76));
         tv.setMaxWidth(max);
         wrap.addView(tv);
         msgList.addView(wrap);
+        Ui.fadeIn(wrap);
         scrollDown();
     }
 
     private void addPhoto(byte[] bytes) {
+        if (photoShown) return;
         Bitmap bm = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
         if (bm == null) return;
+        photoShown = true;
         LinearLayout wrap = new LinearLayout(this);
         wrap.setGravity(Gravity.START);
-        wrap.setPadding(0, dp(4), 0, dp(4));
+        wrap.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
+
+        FrameLayout card = new FrameLayout(this);
+        card.setBackground(Ui.round(this, 0xFF1A2029, 20));
+        card.setClipToOutline(true);
+        if (Build.VERSION.SDK_INT >= 21) card.setElevation(Ui.dp(this, 6));
+
         ImageView iv = new ImageView(this);
         iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        GradientDrawable g = new GradientDrawable();
-        g.setCornerRadius(dp(16));
-        g.setColor(0xFF1A2029);
-        iv.setBackground(g);
-        iv.setClipToOutline(true);
-        int maxW = (int) (getResources().getDisplayMetrics().widthPixels * 0.62);
-        int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.46);
+        iv.setImageBitmap(bm);
+        card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+
+        int maxW = (int) (getResources().getDisplayMetrics().widthPixels * (wide ? 0.27 : 0.66));
+        int maxH = (int) (getResources().getDisplayMetrics().heightPixels * (wide ? 0.46 : 0.44));
         float scale = Math.min((float) maxW / bm.getWidth(), (float) maxH / bm.getHeight());
         int iw = Math.max(1, (int) (bm.getWidth() * scale));
         int ih = Math.max(1, (int) (bm.getHeight() * scale));
-        iv.setImageBitmap(bm);
-        wrap.addView(iv, new LinearLayout.LayoutParams(iw, ih));
+        wrap.addView(card, new LinearLayout.LayoutParams(iw, ih));
         msgList.addView(wrap);
+        Ui.fadeIn(wrap);
         scrollDown();
     }
 
-    private View addTyping() {
+    private void showTyping() {
         LinearLayout wrap = new LinearLayout(this);
         wrap.setGravity(Gravity.START);
-        wrap.setPadding(0, dp(4), 0, dp(4));
-        TextView tv = new TextView(this);
-        tv.setText(persona + "正在打字…");
-        tv.setTextSize(13);
-        tv.setTextColor(0x99FFFFFF);
-        tv.setPadding(dp(14), dp(8), dp(14), dp(8));
-        GradientDrawable b = new GradientDrawable();
-        b.setCornerRadius(dp(18));
-        b.setColor(0x55272E3C);
-        tv.setBackground(b);
+        wrap.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 5));
+        final TextView tv = new TextView(this);
+        tv.setTextColor(0xCCFFFFFF);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        tv.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 16), Ui.dp(this, 10));
+        tv.setBackground(Ui.bubble(this, false));
         wrap.addView(tv);
         msgList.addView(wrap);
+        typing = wrap;
+        Ui.fadeIn(wrap);
+        typingTick = new Runnable() {
+            private int n;
+            @Override public void run() {
+                if (typing == null) return;
+                n = (n + 1) % 4;
+                StringBuilder sb = new StringBuilder(persona).append(" 正在打字");
+                for (int i = 0; i < n; i++) sb.append("·");
+                tv.setText(sb.toString());
+                UI.postDelayed(this, 420);
+            }
+        };
+        UI.post(typingTick);
         scrollDown();
-        return wrap;
+    }
+
+    private void hideTyping() {
+        if (typingTick != null) {
+            UI.removeCallbacks(typingTick);
+            typingTick = null;
+        }
+        if (typing != null && typing.getParent() == msgList) msgList.removeView(typing);
+        typing = null;
     }
 
     private void scrollDown() {
+        if (scroll == null) return;
         scroll.post(new Runnable() {
             @Override public void run() { scroll.fullScroll(View.FOCUS_DOWN); }
         });
         scroll.postDelayed(new Runnable() {
             @Override public void run() { scroll.fullScroll(View.FOCUS_DOWN); }
-        }, 120);
+        }, 140);
     }
 
-    private void refreshHint() {
+    // ------------------------------------------------------------------ 状态
+    private void refreshState() {
         long until = Cfg.releasedUntil(this);
-        if (ended) {
-            hint.setText("她不想理你了。");
-            input.setEnabled(false);
-            send.setEnabled(false);
-            input.setHint("今晚的对话结束了");
-        } else if (until > System.currentTimeMillis()) {
-            long s = Math.max(0, (until - System.currentTimeMillis()) / 1000);
-            hint.setText("放行中… 还剩 " + (s / 60) + " 分 " + (s % 60) + " 秒");
-        } else if (Cfg.grantedTonight(this)) {
-            hint.setText("今晚已经放过你一次了，再求也没用。");
-        } else {
-            hint.setText("想继续玩？好好求她，说不定会放你几分钟。");
+        boolean released = until > System.currentTimeMillis() && !ended;
+        if (hintText != null) {
+            if (ended) {
+                hintText.setText("今晚的对话结束了");
+                input.setEnabled(false);
+                if (send != null) { send.setEnabled(false); send.setAlpha(0.4f); }
+                input.setHint("她已经不理你了");
+            } else if (released) {
+                long s = Math.max(0, (until - System.currentTimeMillis()) / 1000);
+                hintText.setText("放行中 · 还剩 " + (s / 60) + ":" + String.format(java.util.Locale.US, "%02d", s % 60));
+            } else if (Cfg.grantedTonight(this)) {
+                hintText.setText("今晚已经放过你一次了，再求也没用。");
+            } else {
+                hintText.setText("想继续玩？好好求她，说不定会放你几分钟。");
+            }
         }
-        String t = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date());
-        if (clock != null) clock.setText(t);
+
+        String chip;
+        if (released) chip = "放行中 · 到点继续锁";
+        else if (ended) chip = "今晚的会话已结束";
+        else if (Cfg.grantedTonight(this)) chip = "今晚已放过一次";
+        else chip = "今晚还没求过我";
+        if (statusChip != null) {
+            // 竖屏里这一行是标题下的副标题，固定显示守夜时段；状态由底部药丸说明。
+            statusChip.setText(wide ? chip : "守夜中 · "
+                    + Cfg.formatMin(Cfg.startMin(this)) + " – " + Cfg.formatMin(Cfg.endMin(this)));
+        }
+
+        if (clock != null) {
+            clock.setText(new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date()));
+        }
+        UI.removeCallbacks(clockTick);
+        UI.postDelayed(clockTick, 15000);
     }
+
+    private final Runnable clockTick = new Runnable() {
+        @Override public void run() { refreshState(); }
+    };
 
     // ------------------------------------------------------------------ 背景 / 历史
     private void loadBackground() {
@@ -391,14 +572,14 @@ public class LockActivity extends Activity {
             if (bm != null) { bg.setImageBitmap(bm); return; }
         }
         if (!Cfg.configured(this)) return;
-        // 后端 /bg 没有图就保持渐变背景，不报错
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
                     byte[] d = Api.getBytes(LockActivity.this, "/bg");
                     if (d == null || d.length < 100) return;
                     FileOutputStream fo = new FileOutputStream(cache);
-                    fo.write(d); fo.close();
+                    fo.write(d);
+                    fo.close();
                     final Bitmap bm = BitmapFactory.decodeFile(cache.getAbsolutePath());
                     if (bm != null) UI.post(new Runnable() {
                         @Override public void run() { bg.setImageBitmap(bm); }
@@ -420,6 +601,17 @@ public class LockActivity extends Activity {
         } catch (Exception ignored) {}
         if (msgList.getChildCount() == 0) {
             addMsg("assistant", "这么晚了还亮着屏幕……手机放下，去睡觉。");
+        }
+        // 重建界面（旋转、被系统回收）后把今晚那张睡照贴回来。
+        java.io.File photo = new java.io.File(getFilesDir(), "photo_last.jpg");
+        if (photo.exists() && photo.length() > 200) {
+            try {
+                byte[] d = new byte[(int) photo.length()];
+                java.io.FileInputStream fi = new java.io.FileInputStream(photo);
+                int n = fi.read(d);
+                fi.close();
+                if (n > 200) addPhoto(d);
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -466,10 +658,10 @@ public class LockActivity extends Activity {
         final JSONArray history = historyForApi();
         saveHistory("user", text);
 
-        final View typing = addTyping();
         busy = true;
-        send.setEnabled(false);
+        if (send != null) send.setEnabled(false);
         hideKeyboard();
+        showTyping();
 
         new Thread(new Runnable() {
             @Override public void run() {
@@ -487,15 +679,15 @@ public class LockActivity extends Activity {
                 final JSONObject r = resp;
                 final String e = err;
                 UI.post(new Runnable() {
-                    @Override public void run() { onReply(r, e, typing); }
+                    @Override public void run() { onReply(r, e); }
                 });
             }
         }).start();
     }
 
-    private void onReply(JSONObject r, String err, View typing) {
+    private void onReply(JSONObject r, String err) {
         busy = false;
-        if (typing != null && typing.getParent() == msgList) msgList.removeView(typing);
+        hideTyping();
         if (send != null && !ended) send.setEnabled(true);
 
         if (r == null) {
@@ -509,11 +701,7 @@ public class LockActivity extends Activity {
         saveHistory("assistant", say);
 
         final String photo = r.optString("photo", "");
-        String shown = Cfg.sp(this).getString("shownPhoto", "");
-        if (!photo.isEmpty() && !photo.equals(shown)) {
-            Cfg.sp(this).edit().putString("shownPhoto", photo).apply();
-            pollPhoto(photo, 0);
-        }
+        if (!photo.isEmpty()) pollPhoto(photo, 0);
 
         int minutes = r.optInt("allow_minutes", 0);
         if (minutes > 0) {
@@ -522,20 +710,18 @@ public class LockActivity extends Activity {
                     .putLong("releasedUntil", until)
                     .putString("releasedNight", Cfg.nightKey())
                     .apply();
-            hint.setText("好吧，再给你 " + minutes + " 分钟…到点我还会锁的。");
-            input.setEnabled(false);
-            send.setEnabled(false);
+            refreshState();
             Toast.makeText(this, persona + " 放行 " + minutes + " 分钟", Toast.LENGTH_SHORT).show();
             UI.postDelayed(new Runnable() {
                 @Override public void run() { finish(); }
-            }, 1600);
+            }, 1400);
             return;
         }
         if (r.optBoolean("ended", false)) {
             ended = true;
             Cfg.sp(this).edit().putString("endedNight", Cfg.nightKey()).apply();
         }
-        refreshHint();
+        refreshState();
     }
 
     private void pollPhoto(final String path, final int tries) {
@@ -547,10 +733,19 @@ public class LockActivity extends Activity {
                 final byte[] got = d;
                 UI.post(new Runnable() {
                     @Override public void run() {
-                        if (got != null && got.length > 200) addPhoto(got);
-                        else UI.postDelayed(new Runnable() {
-                            @Override public void run() { pollPhoto(path, tries + 1); }
-                        }, 3000);
+                        if (got != null && got.length > 200) {
+                            try {
+                                java.io.FileOutputStream fo = new java.io.FileOutputStream(
+                                        new java.io.File(getFilesDir(), "photo_last.jpg"));
+                                fo.write(got);
+                                fo.close();
+                            } catch (Throwable ignored) {}
+                            addPhoto(got);
+                        } else {
+                            UI.postDelayed(new Runnable() {
+                                @Override public void run() { pollPhoto(path, tries + 1); }
+                            }, 3000);
+                        }
                     }
                 });
             }

@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.app.TimePickerDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,9 +15,10 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.Button;
+import android.view.WindowInsets;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -30,16 +33,24 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 
-/** 设置页：服务器、口令、时间段、背景（可选）、权限、启停。 */
+/**
+ * 设置页：连接、时间段、权限、开始。
+ * 手机竖屏是单列卡片流；平板/横屏自动切成左右两栏。
+ */
 public class MainActivity extends Activity {
     private EditText etServer, etToken, etStart, etEnd;
     private CheckBox cbInsecure;
-    private TextView status;
-    private TextView permOverlay, permNotif, permBatt, permAuto;
+    private TextView statusTitle, statusSub, statusDot;
+    private LinearLayout statusCard;
+    private View permOverlay, permNotif, permBatt, permAuto;
+    private TextView permOverlayMark, permNotifMark, permBattMark, permAutoMark;
+    private TextView bgNote;
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private boolean wide;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        wide = Ui.isWide(this);
         setContentView(build());
         fill();
         askNotification();
@@ -57,95 +68,242 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
-    private int dp(float v) {
-        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
-    }
+    // ------------------------------------------------------------------ 基础控件
+    private int dp(float v) { return Ui.dp(this, v); }
 
-    private TextView label(String s) {
+    private TextView text(String s, int sp, int color) {
         TextView t = new TextView(this);
         t.setText(s);
-        t.setTextColor(0xCCFFFFFF);
-        t.setTextSize(13);
-        t.setPadding(0, dp(12), 0, dp(4));
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextColor(color);
+        return t;
+    }
+
+    private TextView sectionTitle(String s) {
+        TextView t = text(s, 15, Ui.TEXT);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        return t;
+    }
+
+    private LinearLayout card() {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setBackground(Ui.roundStroke(this, 0xFF131922, 20, 0x14FFFFFF, 0.8f));
+        c.setPadding(dp(16), dp(16), dp(16), dp(16));
+        return c;
+    }
+
+    private TextView small(String s) {
+        TextView t = text(s, 12, Ui.TEXT_FAINT);
+        t.setLineSpacing(dp(3), 1f);
         return t;
     }
 
     private EditText field(String hint) {
         EditText e = new EditText(this);
         e.setHint(hint);
-        e.setHintTextColor(0x66FFFFFF);
-        e.setTextColor(0xFFFFFFFF);
-        e.setTextSize(15);
+        e.setHintTextColor(0x59FFFFFF);
+        e.setTextColor(Ui.TEXT);
+        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         e.setSingleLine(true);
         e.setInputType(InputType.TYPE_CLASS_TEXT);
+        e.setBackground(Ui.round(this, 0xFF0B0F16, 12));
+        e.setPadding(dp(12), dp(11), dp(12), dp(11));
         return e;
     }
 
-    private Button button(String text) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setAllCaps(false);
-        b.setTextSize(15);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
-        p.topMargin = dp(10);
-        b.setLayoutParams(p);
-        return b;
-    }
-
-    private TextView permLine() {
-        TextView t = new TextView(this);
-        t.setTextSize(14);
-        t.setTextColor(0xFFFFFFFF);
-        t.setPadding(0, dp(8), 0, dp(8));
+    private TextView primary(String label) {
+        TextView t = text(label, 16, 0xFFFFFFFF);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setGravity(Gravity.CENTER);
+        t.setBackground(Ui.rippleGradient(this, 0xFFFF8DB4, Ui.ACCENT_DARK, 14));
+        t.setPadding(0, dp(14), 0, dp(14));
         return t;
     }
 
+    private TextView secondary(String label) {
+        TextView t = text(label, 14, Ui.TEXT);
+        t.setGravity(Gravity.CENTER);
+        t.setBackground(Ui.rippleRoundStroke(this, 0x00000000, 14, 0x33FFFFFF));
+        t.setPadding(0, dp(12), 0, dp(12));
+        return t;
+    }
+
+    private View gap(int h) {
+        View v = new View(this);
+        v.setLayoutParams(new LinearLayout.LayoutParams(1, dp(h)));
+        return v;
+    }
+
+    private View divider() {
+        View v = new View(this);
+        v.setBackgroundColor(0x14FFFFFF);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, Math.max(1, dp(0.7f)));
+        p.topMargin = dp(12);
+        p.bottomMargin = dp(4);
+        v.setLayoutParams(p);
+        return v;
+    }
+
+    // ------------------------------------------------------------------ 整页
     private View build() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackground(Ui.gradient(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xFF101725, 0xFF070A10}));
+        page.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+                v.setPadding(0, 0, 0, insets.getSystemWindowInsetBottom());
+                return insets;
+            }
+        });
+
+        page.addView(buildTopBar(), new LinearLayout.LayoutParams(-1, -2));
+
+        View fade = new View(this);
+        fade.setBackground(Ui.gradient(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xFF0C1119, 0x000C1119}));
+        page.addView(fade, new LinearLayout.LayoutParams(-1, dp(14)));
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        int pad = dp(wide ? 24 : 16);
+        int side = pad;
+        if (wide) {
+            // 平板/折叠屏上把内容收在中间，避免一行字拉得太长。
+            int extra = (getResources().getDisplayMetrics().widthPixels - dp(1180)) / 2;
+            if (extra > pad) side = extra;
+        }
+        body.setPadding(side, dp(4), side, dp(8));
+        page.addView(body, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        if (wide) {
+            ScrollView left = scrollColumn();
+            ScrollView right = scrollColumn();
+            LinearLayout l = (LinearLayout) left.getChildAt(0);
+            LinearLayout r = (LinearLayout) right.getChildAt(0);
+            l.addView(connectionCard());
+            l.addView(gap(14));
+            l.addView(windowCard());
+            l.addView(gap(14));
+            l.addView(statusCardView());
+            r.addView(permissionCard());
+            r.addView(gap(14));
+            r.addView(actionCard());
+            r.addView(gap(14));
+            r.addView(aboutCard());
+            body.addView(left, new LinearLayout.LayoutParams(0, -1, 1f));
+            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(0, -1, 1f);
+            rp.leftMargin = dp(18);
+            body.addView(right, rp);
+        } else {
+            ScrollView sc = scrollColumn();
+            LinearLayout col = (LinearLayout) sc.getChildAt(0);
+            col.addView(connectionCard());
+            col.addView(gap(14));
+            col.addView(windowCard());
+            col.addView(gap(14));
+            col.addView(statusCardView());
+            col.addView(gap(14));
+            col.addView(permissionCard());
+            col.addView(gap(14));
+            col.addView(actionCard());
+            col.addView(gap(14));
+            col.addView(aboutCard());
+            body.addView(sc, new LinearLayout.LayoutParams(-1, -1));
+        }
+        return page;
+    }
+
+    private ScrollView scrollColumn() {
         ScrollView sc = new ScrollView(this);
-        sc.setBackgroundColor(0xFF0B0F14);
+        sc.setVerticalScrollBarEnabled(false);
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(20), dp(24), dp(20), dp(32));
-        sc.addView(col);
+        col.setPadding(0, dp(8), 0, dp(32));
+        sc.addView(col, new ScrollView.LayoutParams(-1, -2));
+        return sc;
+    }
 
-        TextView title = new TextView(this);
-        title.setText("守夜人 · NightGuard");
-        title.setTextColor(0xFFFFFFFF);
-        title.setTextSize(24);
-        col.addView(title);
+    private View buildTopBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(wide ? 28 : 18), dp(20), dp(wide ? 28 : 18), dp(12));
+        // 不透明底色，滚动内容才不会从标题下面透出来。
+        bar.setBackgroundColor(0xFF101725);
 
-        TextView sub = new TextView(this);
-        sub.setText("到点盖上一层关不掉的聊天框，把当前 App 压到后台（不杀进程）。\n"
-                + "跟你的 AstrBot 角色求情，也许能求来几分钟——一晚只放一次。");
-        sub.setTextColor(0x99FFFFFF);
-        sub.setTextSize(13);
-        sub.setPadding(0, dp(8), 0, 0);
-        col.addView(sub);
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
 
-        col.addView(label("服务器地址（你的 AstrBot 守夜后端）"));
-        etServer = field("https://你的域名/night 或 http://192.168.1.10:6200");
-        col.addView(etServer);
+        TextView t = text("守夜人", 26, Ui.TEXT);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        titles.addView(t);
 
-        col.addView(label("口令（后端插件里的 api_token）"));
-        etToken = field("在 AstrBot 插件配置里查看/设置");
-        col.addView(etToken);
+        TextView sub = text("到点盖一层关不掉的聊天框 · 一晚只放一次", 12, Ui.TEXT_DIM);
+        sub.setPadding(0, dp(4), 0, 0);
+        titles.addView(sub);
+        bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        TextView badge = text("v1.1", 11, Ui.ACCENT);
+        badge.setBackground(Ui.roundStroke(this, 0x1AFF6FA5, 999, 0x33FF6FA5, 0.8f));
+        badge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        bar.addView(badge);
+        return bar;
+    }
+
+    // ------------------------------------------------------------------ 卡片
+    private View connectionCard() {
+        LinearLayout c = card();
+        c.addView(sectionTitle("连接"));
+
+        TextView hint = small("你的 AstrBot 守夜后端地址。自建服务器没证书就勾下面的选项。");
+        hint.setPadding(0, dp(6), 0, dp(10));
+        c.addView(hint);
+
+        c.addView(fieldLabel("服务器地址"));
+        etServer = field("https://example.com/night");
+        c.addView(etServer);
+
+        c.addView(fieldLabel("口令"));
+        etToken = field("后端插件配置里的 api_token");
+        c.addView(etToken);
 
         cbInsecure = new CheckBox(this);
-        cbInsecure.setText("信任自签证书（自建服务器 / 直接连 IP 时勾上）");
-        cbInsecure.setTextColor(0xCCFFFFFF);
-        cbInsecure.setTextSize(13);
-        cbInsecure.setPadding(0, dp(8), 0, 0);
-        col.addView(cbInsecure);
+        cbInsecure.setText("信任自签证书 / 直连 IP");
+        cbInsecure.setTextColor(Ui.TEXT_DIM);
+        cbInsecure.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        cbInsecure.setPadding(0, dp(10), 0, 0);
+        if (Build.VERSION.SDK_INT >= 21) {
+            cbInsecure.setButtonTintList(android.content.res.ColorStateList.valueOf(Ui.ACCENT));
+        }
+        c.addView(cbInsecure);
+        return c;
+    }
 
-        LinearLayout times = new LinearLayout(this);
-        times.setOrientation(LinearLayout.HORIZONTAL);
-        times.setGravity(Gravity.CENTER_VERTICAL);
+    private TextView fieldLabel(String s) {
+        TextView t = text(s, 12, Ui.TEXT_FAINT);
+        t.setPadding(0, dp(10), 0, dp(6));
+        return t;
+    }
+
+    private View windowCard() {
+        LinearLayout c = card();
+        c.addView(sectionTitle("守夜时间"));
+
+        TextView hint = small("只在时间段内盖锁屏；跨零点会自动识别（比如 23:30 → 06:30）。");
+        hint.setPadding(0, dp(6), 0, dp(10));
+        c.addView(hint);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
 
         LinearLayout c1 = new LinearLayout(this);
         c1.setOrientation(LinearLayout.VERTICAL);
-        c1.addView(label("开始时间"));
+        c1.addView(fieldLabel("开始"));
         etStart = field("23:30");
         etStart.setFocusable(false);
+        etStart.setGravity(Gravity.CENTER);
         etStart.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { pick(etStart); }
         });
@@ -153,99 +311,164 @@ public class MainActivity extends Activity {
 
         LinearLayout c2 = new LinearLayout(this);
         c2.setOrientation(LinearLayout.VERTICAL);
-        c2.addView(label("结束时间"));
+        c2.addView(fieldLabel("结束"));
         etEnd = field("06:30");
         etEnd.setFocusable(false);
+        etEnd.setGravity(Gravity.CENTER);
         etEnd.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { pick(etEnd); }
         });
         c2.addView(etEnd);
 
-        times.addView(c1, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.addView(c1, new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(0, -2, 1f);
         mp.leftMargin = dp(12);
-        times.addView(c2, mp);
-        col.addView(times);
+        row.addView(c2, mp);
+        c.addView(row);
+        return c;
+    }
 
-        status = new TextView(this);
-        status.setTextColor(0xFFFF9EC4);
-        status.setTextSize(13);
-        status.setPadding(0, dp(16), 0, 0);
-        col.addView(status);
+    private View statusCardView() {
+        statusCard = new LinearLayout(this);
+        statusCard.setOrientation(LinearLayout.HORIZONTAL);
+        statusCard.setGravity(Gravity.CENTER_VERTICAL);
+        statusCard.setBackground(Ui.roundStroke(this, 0x14FF6FA5, 18, 0x33FF6FA5, 0.8f));
+        statusCard.setPadding(dp(16), dp(14), dp(16), dp(14));
 
-        Button save = button("保存并启动守夜");
-        save.setOnClickListener(new View.OnClickListener() {
+        statusDot = text("●", 12, Ui.ACCENT);
+        statusCard.addView(statusDot);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setPadding(dp(10), 0, 0, 0);
+        statusTitle = text("守夜未开启", 14, Ui.TEXT);
+        statusTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        statusSub = text("", 12, Ui.TEXT_DIM);
+        statusSub.setPadding(0, dp(2), 0, 0);
+        texts.addView(statusTitle);
+        texts.addView(statusSub);
+        statusCard.addView(texts);
+        return statusCard;
+    }
+
+    private View permissionCard() {
+        LinearLayout c = card();
+        c.addView(sectionTitle("强控制需要的权限"));
+        TextView hint = small("点任意一行直接跳到对应的系统页面。锁不住、到点不弹，基本都出在这里。");
+        hint.setPadding(0, dp(6), 0, dp(8));
+        c.addView(hint);
+
+        permOverlay = permRow("悬浮窗", "必需 · 后台才能把全屏界面顶上来");
+        permOverlayMark = (TextView) permOverlay.getTag();
+        c.addView(permOverlay);
+        c.addView(permSep());
+
+        permNotif = permRow("通知", "Android 13+ 必需 · 前台服务要挂常驻通知");
+        permNotifMark = (TextView) permNotif.getTag();
+        c.addView(permNotif);
+        c.addView(permSep());
+
+        permBatt = permRow("电池优化白名单", "推荐 · 防止息屏后服务被冻结");
+        permBattMark = (TextView) permBatt.getTag();
+        c.addView(permBatt);
+        c.addView(permSep());
+
+        permAuto = permRow("自启动 / 后台弹出", "国产 ROM 推荐 · 按 Home 或清后台后仍能拉回锁屏");
+        permAutoMark = (TextView) permAuto.getTag();
+        c.addView(permAuto);
+
+        permOverlay.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { openOverlay(); }
+        });
+        permNotif.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { openNotif(); }
+        });
+        permBatt.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { openBattery(); }
+        });
+        permAuto.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { openAutoStart(); }
+        });
+        return c;
+    }
+
+    private View permSep() {
+        View v = new View(this);
+        v.setBackgroundColor(0x0FFFFFFF);
+        v.setLayoutParams(new LinearLayout.LayoutParams(-1, Math.max(1, dp(0.7f))));
+        return v;
+    }
+
+    /** 一行权限：状态点 + 名称/说明 + 箭头；状态点放在 tag 里。 */
+    private View permRow(String title, String desc) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(Ui.rippleRound(this, 0x00000000, 12));
+        row.setPadding(dp(6), dp(12), dp(6), dp(12));
+
+        TextView mark = text("○", 15, 0x80FFFFFF);
+        mark.setGravity(Gravity.CENTER);
+        mark.setIncludeFontPadding(false);
+        row.addView(mark, new LinearLayout.LayoutParams(dp(22), dp(22)));
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView t1 = text(title, 14, Ui.TEXT);
+        TextView t2 = text(desc, 11, Ui.TEXT_FAINT);
+        t2.setPadding(0, dp(3), 0, 0);
+        texts.addView(t1);
+        texts.addView(t2);
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        TextView a = text("›", 20, Ui.TEXT_FAINT);
+        a.setPadding(dp(8), 0, dp(4), 0);
+        row.addView(a);
+
+        row.setTag(mark);
+        return row;
+    }
+
+    private View actionCard() {
+        LinearLayout c = card();
+        c.addView(sectionTitle("开始守夜"));
+
+        TextView hint = small("开启后到点自动上锁；「立即锁一次」用来当场验收效果。");
+        hint.setPadding(0, dp(6), 0, dp(12));
+        c.addView(hint);
+
+        TextView start = primary("保存并启动守夜");
+        start.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { save(true); }
         });
-        col.addView(save);
+        c.addView(start);
 
-        Button stop = button("停止守夜");
+        c.addView(gap(10));
+
+        TextView stop = secondary("停止守夜");
         stop.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Cfg.sp(MainActivity.this).edit().putBoolean("enabled", false).apply();
                 stopService(new Intent(MainActivity.this, GuardService.class));
                 LockActivity.closeNow();
                 refreshStatus();
+                Toast.makeText(MainActivity.this, "守夜已停止", Toast.LENGTH_SHORT).show();
             }
         });
-        col.addView(stop);
+        c.addView(stop);
 
-        // ---------------------------------------------------------- 权限区
-        TextView permTitle = new TextView(this);
-        permTitle.setText("\n要「强控制」得开这些权限");
-        permTitle.setTextColor(0xFFFFFFFF);
-        permTitle.setTextSize(17);
-        permTitle.setPadding(0, dp(22), 0, dp(4));
-        col.addView(permTitle);
+        c.addView(gap(10));
 
-        TextView permWhy = new TextView(this);
-        permWhy.setText("• 悬浮窗：必需。Android 只允许有这项权限的 App 在后台把全屏界面顶上来。\n"
-                + "• 通知：Android 13+ 必需。前台服务要挂一条常驻通知，否则守夜会被系统掐掉。\n"
-                + "• 电池优化白名单：推荐。不加的话息屏/省电模式可能把守夜服务冻结。\n"
-                + "• 自启动 / 后台弹出：国产 ROM 专属，推荐。允许后，按 Home 或清理后台也不会被拦。");
-        permWhy.setTextColor(0x99FFFFFF);
-        permWhy.setTextSize(12);
-        permWhy.setLineSpacing(dp(4), 1f);
-        permWhy.setPadding(0, dp(4), 0, dp(6));
-        col.addView(permWhy);
+        LinearLayout pair = new LinearLayout(this);
+        pair.setOrientation(LinearLayout.HORIZONTAL);
 
-        permOverlay = permLine();
-        permOverlay.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { openOverlay(); }
-        });
-        col.addView(permOverlay);
-
-        permNotif = permLine();
-        permNotif.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { openNotif(); }
-        });
-        col.addView(permNotif);
-
-        permBatt = permLine();
-        permBatt.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { openBattery(); }
-        });
-        col.addView(permBatt);
-
-        permAuto = permLine();
-        permAuto.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { openAutoStart(); }
-        });
-        col.addView(permAuto);
-
-        Button bgBtn = button("选择聊天框背景图（可选）");
-        bgBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { pickBg(); }
-        });
-        col.addView(bgBtn);
-
-        Button test = button("测试连接");
+        TextView test = secondary("测试连接");
         test.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { save(false); testConn(); }
         });
-        col.addView(test);
+        pair.addView(test, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        Button lockNow = button("立即锁一次（测试用）");
+        TextView lockNow = secondary("立即锁一次");
         lockNow.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (!Cfg.configured(MainActivity.this)) {
@@ -261,17 +484,37 @@ public class MainActivity extends Activity {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
             }
         });
-        col.addView(lockNow);
-
-        TextView tip = new TextView(this);
-        tip.setText("\n提示：守夜期间打电话、解锁都正常；要停只能回这个 App 点「停止守夜」，"
-                + "或在锁屏界面长按左上角头像。");
-        tip.setTextColor(0x77FFFFFF);
-        tip.setTextSize(12);
-        col.addView(tip);
-        return sc;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+        lp.leftMargin = dp(10);
+        pair.addView(lockNow, lp);
+        c.addView(pair);
+        return c;
     }
 
+    private View aboutCard() {
+        LinearLayout c = card();
+        c.addView(sectionTitle("聊天框背景"));
+        TextView hint = small("不选就用内置的深色渐变。选一张你喜欢的图会成为锁屏背景。");
+        hint.setPadding(0, dp(6), 0, dp(10));
+        c.addView(hint);
+
+        bgNote = text(Cfg.bgPath(this).isEmpty() ? "当前：内置渐变" : "当前：自定义图片", 12, Ui.ACCENT);
+        c.addView(bgNote);
+        c.addView(gap(10));
+
+        TextView pick = secondary("选择图片");
+        pick.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickBg(); }
+        });
+        c.addView(pick);
+
+        c.addView(divider());
+        c.addView(small("守夜期间打电话、解锁都正常。要停只能回这个 App 点「停止守夜」，"
+                + "或在锁屏左上角长按头像。"));
+        return c;
+    }
+
+    // ------------------------------------------------------------------ 数据
     private void fill() {
         etServer.setText(Cfg.server(this));
         etToken.setText(Cfg.token(this));
@@ -316,7 +559,7 @@ public class MainActivity extends Activity {
         Toast.makeText(this, start ? "守夜已开启" : "已保存", Toast.LENGTH_SHORT).show();
     }
 
-    // ------------------------------------------------------------ 权限
+    // ------------------------------------------------------------------ 权限
     private boolean hasOverlay() {
         return Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this);
     }
@@ -374,7 +617,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 国产 ROM 的自启动/后台管理页，没有就退回应用详情页。 */
     private void openAutoStart() {
         String[][] pages = new String[][]{
                 {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
@@ -408,14 +650,24 @@ public class MainActivity extends Activity {
     }
 
     private void refreshPerms() {
-        if (permOverlay == null) return;
-        permOverlay.setText((hasOverlay() ? "✅ " : "⚠️ ") + "悬浮窗（必需）—— " + (hasOverlay() ? "已开启" : "点这里开启"));
-        permNotif.setText((hasNotif() ? "✅ " : "⚠️ ") + "通知（前台服务）—— " + (hasNotif() ? "已开启" : "点这里开启"));
-        permBatt.setText((batteryOk() ? "✅ " : "○ ") + "电池优化白名单 —— " + (batteryOk() ? "已加入" : "点这里加入"));
-        permAuto.setText("○ 自启动 / 后台弹出（国产 ROM）—— 点这里打开系统页面");
+        if (permOverlayMark == null) return;
+        setMark(permOverlayMark, hasOverlay(), true);
+        setMark(permNotifMark, hasNotif(), true);
+        setMark(permBattMark, batteryOk(), false);
+        setMark(permAutoMark, false, false);
     }
 
-    // ------------------------------------------------------------ 背景 / 连接
+    private void setMark(TextView mark, boolean ok, boolean required) {
+        if (ok) {
+            mark.setText("✓");
+            mark.setTextColor(0xFF3DDC97);
+        } else {
+            mark.setText(required ? "!" : "○");
+            mark.setTextColor(required ? Ui.ACCENT : Ui.TEXT_FAINT);
+        }
+    }
+
+    // ------------------------------------------------------------------ 背景 / 连接
     private void pickBg() {
         try {
             Intent i = new Intent(Intent.ACTION_GET_CONTENT);
@@ -440,6 +692,10 @@ public class MainActivity extends Activity {
             if (is != null) is.close();
             fo.close();
             Cfg.sp(this).edit().putString("bg", out.getAbsolutePath()).apply();
+            if (bgNote != null) {
+                bgNote.setText("当前：自定义图片");
+                bgNote.setTextColor(Ui.ACCENT);
+            }
             Toast.makeText(this, "背景已换（下次进锁屏生效）", Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
             Toast.makeText(this, "读取图片失败", Toast.LENGTH_SHORT).show();
@@ -447,10 +703,12 @@ public class MainActivity extends Activity {
     }
 
     private void testConn() {
-        status.setText("正在连接…");
+        statusTitle.setText("正在连接…");
+        statusSub.setText(Cfg.server(this));
+        statusDot.setTextColor(Ui.TEXT_FAINT);
         final String server = Cfg.server(this);
         if (server.isEmpty() || Cfg.token(this).isEmpty()) {
-            status.setText("先把服务器地址和口令填好");
+            statusTitle.setText("先去填服务器和口令");
             return;
         }
         new Thread(new Runnable() {
@@ -470,7 +728,7 @@ public class MainActivity extends Activity {
                 final String m = msg;
                 ui.post(new Runnable() {
                     @Override public void run() {
-                        status.setText(m);
+                        refreshStatus();
                         new AlertDialog.Builder(MainActivity.this).setTitle("测试连接")
                                 .setMessage(m).setPositiveButton("好", null).show();
                     }
@@ -480,13 +738,26 @@ public class MainActivity extends Activity {
     }
 
     private void refreshStatus() {
+        if (statusTitle == null) return;
         boolean enabled = Cfg.enabled(this);
         boolean win = Cfg.inWindow(this);
-        String s = (enabled ? "守夜进行中" : "守夜未开启")
-                + " · " + (win ? "现在在时段内" : "现在不在时段内")
-                + (Cfg.configured(this) ? "" : " · 还没配置服务器")
-                + "\n今晚：" + (Cfg.grantedTonight(this) ? "已放行过一次" : "还没放行")
-                + (Cfg.endedTonight(this) ? " · 会话已结束" : "");
-        status.setText(s);
+        boolean granted = Cfg.grantedTonight(this);
+        boolean ended = Cfg.endedTonight(this);
+
+        statusTitle.setText(enabled ? "守夜进行中" : "守夜未开启");
+        StringBuilder sb = new StringBuilder();
+        sb.append(win ? "现在在时段内" : "现在不在时段内");
+        if (!Cfg.configured(this)) sb.append(" · 还没配置服务器");
+        sb.append(" · 今晚").append(granted ? "已放行过一次" : "还没放行");
+        if (ended) sb.append(" · 会话已结束");
+        statusSub.setText(sb.toString());
+
+        if (statusCard != null) {
+            statusCard.setBackground(Ui.roundStroke(this,
+                    enabled ? 0x14FF6FA5 : 0x0FFFFFFF,
+                    18,
+                    enabled ? 0x33FF6FA5 : 0x1FFFFFFF, 0.8f));
+            statusDot.setTextColor(enabled ? Ui.ACCENT : Ui.TEXT_FAINT);
+        }
     }
 }
