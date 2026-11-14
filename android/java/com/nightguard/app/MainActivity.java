@@ -629,7 +629,7 @@ public class MainActivity extends Activity {
             startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                     .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
         } catch (Throwable t) {
-            Toast.makeText(this, "设置 → 通知 → 找到「守夜人」打开", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "设置 → 通知 → 找到「守夜鱼」打开", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -642,7 +642,7 @@ public class MainActivity extends Activity {
             try {
                 startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
             } catch (Throwable t2) {
-                Toast.makeText(this, "设置 → 电池 → 电池优化 → 找到「守夜人」选「不优化」", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "设置 → 电池 → 电池优化 → 找到「守夜鱼」选「不优化」", Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -675,7 +675,7 @@ public class MainActivity extends Activity {
                     Uri.parse("package:" + getPackageName())));
             Toast.makeText(this, "这台手机没有统一入口：在「应用详情 → 自启动/后台管理」里手动允许", Toast.LENGTH_LONG).show();
         } catch (Throwable t) {
-            Toast.makeText(this, "请到系统设置的「自启动管理」里允许「守夜人」", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "请到系统设置的「自启动管理」里允许「守夜鱼」", Toast.LENGTH_LONG).show();
         }
     }
 
