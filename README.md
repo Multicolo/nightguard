@@ -254,6 +254,12 @@ docker logs -f astrbot | grep night_guard
 
 ## 更新日志
 
+### v1.2.1
+
+- 换成新图标：月夜海边小屋（由用户提供的图生成 5 档 mipmap）。
+- 权限引导里的 App 名同步为「守夜鱼」。
+- 功能与 v1.2.0 相同。
+
 ### v1.2.0 · M1 上锁闭环
 
 - 上锁闭环：`LockActivity` 回写 `lastAttachAt`，`GuardService` 500ms 回读；未命中重试 3 次（间隔 1s），仍失败发高优先级「今晚守夜失败：<原因>」通知，并把原因写进自检页。

@@ -1,5 +1,7 @@
 # 守夜鱼 · NightGuard（AstrBot 插件）
 
+<img src="logo.png" width="96" align="right" alt="守夜鱼">
+
 到点把手机盖成**关不掉的聊天框**，只能跟你的 AstrBot 角色求情睡觉。
 
 这是守夜鱼的后端插件：它不接管 bot 的聊天，只额外开一个 HTTP 服务给 Android App 用。

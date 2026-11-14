@@ -255,7 +255,7 @@ public class MainActivity extends Activity {
         titles.addView(sub);
         bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        TextView badge = text("v1.2", 11, Ui.ACCENT);
+        TextView badge = text("v1.2.1", 11, Ui.ACCENT);
         badge.setBackground(Ui.roundStroke(this, 0x1AFF6FA5, 999, 0x33FF6FA5, 0.8f));
         badge.setPadding(dp(10), dp(4), dp(10), dp(4));
         bar.addView(badge);
