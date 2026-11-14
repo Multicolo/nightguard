@@ -20,6 +20,8 @@ public class App extends Application {
 
     @Override public void onCreate() {
         super.onCreate();
+        // 统一时间源：把落盘的「服务器 − 本机」偏移读回来；M1 默认 0。
+        Clock.init(this);
     }
 
     /** 勾了「信任自签证书」才用它；否则返回 null，走系统默认校验。 */

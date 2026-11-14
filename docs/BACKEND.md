@@ -1,7 +1,10 @@
 # 后端部署（AstrBot 插件）
 
-NightGuard 的后端是一个普通 AstrBot 插件：它不接管 bot 的消息，只额外开一个 HTTP 服务给手机 App 用。
+守夜鱼 NightGuard 的后端是一个普通 AstrBot 插件：它不接管 bot 的消息，只额外开一个 HTTP 服务给手机 App 用。
 角色、模型、记忆、生图都复用你 AstrBot 里已有的配置。
+
+> 插件仓库：<https://github.com/Multicolo/astrbot_plugin_night_guard>
+> APK 下载：<https://github.com/Multicolo/nightguard/releases/latest/download/NightGuard.apk>
 
 ---
 
@@ -9,10 +12,18 @@ NightGuard 的后端是一个普通 AstrBot 插件：它不接管 bot 的消息�
 
 | 部署方式 | 插件目录 |
 | --- | --- |
+| 插件市场（推荐） | AstrBot WebUI → 插件 → 插件市场，搜索「守夜鱼」 |
 | Docker（常见） | 宿主机 `.../astrbot-data/plugins/astrbot_plugin_night_guard/`，容器内 `/AstrBot/data/plugins/` |
 | 裸机 / 源码 | `AstrBot/data/plugins/astrbot_plugin_night_guard/` |
 
-把 `backend/astrbot_plugin_night_guard/` 下 5 个文件整个拷进去：
+手动安装：
+
+```bash
+cd <AstrBot>/data/plugins
+git clone https://github.com/Multicolo/astrbot_plugin_night_guard
+```
+
+插件目录需要包含这 5 个文件：
 
 ```
 main.py  imageclient.py  _conf_schema.json  metadata.yaml  __init__.py

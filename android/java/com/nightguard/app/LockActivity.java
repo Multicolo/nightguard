@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.util.Log;
 import android.util.TypedValue;
@@ -40,6 +41,11 @@ import java.io.FileOutputStream;
  */
 public class LockActivity extends Activity {
     private static volatile boolean ALIVE = false;
+    /**
+     * 上锁回写心跳：onCreate/onResume 写入 SystemClock.elapsedRealtime()。
+     * GuardService 发起后等 500ms 回读这个值，没变就说明这轮没打中。
+     */
+    public static volatile long lastAttachAt = 0L;
     private static LockActivity INSTANCE;
     private static final Handler UI = new Handler(Looper.getMainLooper());
 
@@ -78,6 +84,7 @@ public class LockActivity extends Activity {
         super.onCreate(b);
         INSTANCE = this;
         ALIVE = true;
+        lastAttachAt = SystemClock.elapsedRealtime();
         persona = Cfg.persona(this);
         ended = Cfg.endedTonight(this);
         wide = Ui.isWide(this);
@@ -115,13 +122,18 @@ public class LockActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         ALIVE = true;
+        lastAttachAt = SystemClock.elapsedRealtime();
         hideBars();
         scrollDown();
     }
 
-    @Override protected void onPause() {
-        super.onPause();
+    /**
+     * 只在真正不可见时才算「锁没了」。原实现在 onPause 里置 false，
+     * 系统弹个权限框/通知栏下拉就会被服务当成锁已关闭，每 2 秒重新拉一次。
+     */
+    @Override protected void onStop() {
         ALIVE = false;
+        super.onStop();
     }
 
     @Override protected void onDestroy() {
@@ -520,7 +532,7 @@ public class LockActivity extends Activity {
     // ------------------------------------------------------------------ 状态
     private void refreshState() {
         long until = Cfg.releasedUntil(this);
-        boolean released = until > System.currentTimeMillis() && !ended;
+        boolean released = until > Clock.now() && !ended;
         if (hintText != null) {
             if (ended) {
                 hintText.setText("今晚的对话结束了");
@@ -528,7 +540,7 @@ public class LockActivity extends Activity {
                 if (send != null) { send.setEnabled(false); send.setAlpha(0.4f); }
                 input.setHint("她已经不理你了");
             } else if (released) {
-                long s = Math.max(0, (until - System.currentTimeMillis()) / 1000);
+                long s = Math.max(0, (until - Clock.now()) / 1000);
                 hintText.setText("放行中 · 还剩 " + (s / 60) + ":" + String.format(java.util.Locale.US, "%02d", s % 60));
             } else if (Cfg.grantedTonight(this)) {
                 hintText.setText("今晚已经放过你一次了，再求也没用。");
@@ -549,7 +561,8 @@ public class LockActivity extends Activity {
         }
 
         if (clock != null) {
-            clock.setText(new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(new java.util.Date()));
+            clock.setText(new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                    .format(new java.util.Date(Clock.now())));
         }
         UI.removeCallbacks(clockTick);
         UI.postDelayed(clockTick, 15000);
@@ -705,7 +718,7 @@ public class LockActivity extends Activity {
 
         int minutes = r.optInt("allow_minutes", 0);
         if (minutes > 0) {
-            long until = System.currentTimeMillis() + minutes * 60_000L;
+            long until = Clock.now() + minutes * 60_000L;
             Cfg.sp(this).edit()
                     .putLong("releasedUntil", until)
                     .putString("releasedNight", Cfg.nightKey())

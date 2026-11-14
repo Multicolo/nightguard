@@ -15,6 +15,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -45,6 +46,7 @@ public class MainActivity extends Activity {
     private View permOverlay, permNotif, permBatt, permAuto;
     private TextView permOverlayMark, permNotifMark, permBattMark, permAutoMark;
     private TextView bgNote;
+    private TextView selfBody;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean wide;
 
@@ -58,13 +60,17 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        GuardService.settingsOpen = true;
+        GuardService.setSettingsOpen(true);
         refreshStatus();
         refreshPerms();
+        refreshSelfCheck();
+        ui.removeCallbacks(selfTick);
+        ui.post(selfTick);
     }
 
     @Override protected void onPause() {
-        GuardService.settingsOpen = false;
+        GuardService.setSettingsOpen(false);
+        ui.removeCallbacks(selfTick);
         super.onPause();
     }
 
@@ -187,6 +193,8 @@ public class MainActivity extends Activity {
             l.addView(windowCard());
             l.addView(gap(14));
             l.addView(statusCardView());
+            l.addView(gap(14));
+            l.addView(selfCheckCard());
             r.addView(permissionCard());
             r.addView(gap(14));
             r.addView(actionCard());
@@ -204,6 +212,8 @@ public class MainActivity extends Activity {
             col.addView(windowCard());
             col.addView(gap(14));
             col.addView(statusCardView());
+            col.addView(gap(14));
+            col.addView(selfCheckCard());
             col.addView(gap(14));
             col.addView(permissionCard());
             col.addView(gap(14));
@@ -236,7 +246,7 @@ public class MainActivity extends Activity {
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
 
-        TextView t = text("守夜人", 26, Ui.TEXT);
+        TextView t = text("守夜鱼", 26, Ui.TEXT);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         titles.addView(t);
 
@@ -245,7 +255,7 @@ public class MainActivity extends Activity {
         titles.addView(sub);
         bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        TextView badge = text("v1.1", 11, Ui.ACCENT);
+        TextView badge = text("v1.2", 11, Ui.ACCENT);
         badge.setBackground(Ui.roundStroke(this, 0x1AFF6FA5, 999, 0x33FF6FA5, 0.8f));
         badge.setPadding(dp(10), dp(4), dp(10), dp(4));
         bar.addView(badge);
@@ -291,7 +301,7 @@ public class MainActivity extends Activity {
         LinearLayout c = card();
         c.addView(sectionTitle("守夜时间"));
 
-        TextView hint = small("只在时间段内盖锁屏；跨零点会自动识别（比如 23:30 → 06:30）。");
+        TextView hint = small("只在时间段内盖锁屏；跨零点会自动识别（比如 23:30 → 06:30）。单晚最多 8 小时。");
         hint.setPadding(0, dp(6), 0, dp(10));
         c.addView(hint);
 
@@ -349,6 +359,21 @@ public class MainActivity extends Activity {
         texts.addView(statusSub);
         statusCard.addView(texts);
         return statusCard;
+    }
+
+    /** 自检区块：到点没锁时先看这里，区分「服务死了」和「发射了但没打中」。 */
+    private View selfCheckCard() {
+        LinearLayout c = card();
+        c.addView(sectionTitle("自检"));
+        TextView hint = small("tick 在涨说明服务活着；「上次成功上锁」不动，就是界面没起来。");
+        hint.setPadding(0, dp(6), 0, dp(10));
+        c.addView(hint);
+
+        selfBody = text("", 12, Ui.TEXT_DIM);
+        selfBody.setTypeface(Typeface.MONOSPACE);
+        selfBody.setLineSpacing(dp(5), 1f);
+        c.addView(selfBody);
+        return c;
     }
 
     private View permissionCard() {
@@ -537,6 +562,11 @@ public class MainActivity extends Activity {
         if (server.endsWith("/")) server = server.substring(0, server.length() - 1);
         int s = Cfg.parseMin(etStart.getText().toString(), 23 * 60 + 30);
         int e = Cfg.parseMin(etEnd.getText().toString(), 6 * 60 + 30);
+        // 时间窗硬上限 8 小时：服务器时区误配时，这是 PIN 之外的第二道保险。
+        if (Cfg.windowMinutes(s, e) > Cfg.MAX_WINDOW_MIN) {
+            Toast.makeText(this, "单晚最多 8 小时", Toast.LENGTH_LONG).show();
+            return;
+        }
         Cfg.sp(this).edit()
                 .putString("server", server)
                 .putString("token", etToken.getText().toString().trim())
@@ -666,6 +696,64 @@ public class MainActivity extends Activity {
             mark.setTextColor(required ? Ui.ACCENT : Ui.TEXT_FAINT);
         }
     }
+
+    // ------------------------------------------------------------------ 自检
+    private void refreshSelfCheck() {
+        if (selfBody == null) return;
+        String reason = GuardService.lastFailReason;
+        long failAt = GuardService.lastFailAt;
+        String savedReason = Cfg.sp(this).getString("lastFailReason", "");
+        long savedAt = Cfg.sp(this).getLong("lastFailAt", 0L);
+        if (savedAt > failAt) {
+            reason = savedReason;
+            failAt = savedAt;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("服务：").append(GuardService.running ? "运行中" : "未运行")
+                .append(" · tick ").append(GuardService.tickCount);
+        long lockAt = GuardService.lastLockAt;
+        if (lockAt <= 0) lockAt = Cfg.sp(this).getLong("lastLockAt", 0L);
+        sb.append('\n').append("上次成功上锁：")
+                .append(lockAt > 0 ? formatTs(lockAt) : "还没有");
+        sb.append('\n').append("最近失败：").append(reason == null || reason.isEmpty() ? "无" : reason);
+        if (failAt > 0) sb.append(" · ").append(formatTs(failAt));
+        sb.append('\n').append("悬浮窗 ").append(ok(hasOverlay()))
+                .append("   通知 ").append(ok(hasNotif()))
+                .append("   电池 ").append(ok(batteryOk()))
+                .append("   无障碍 ").append(ok(accessibilityOk()));
+        selfBody.setText(sb.toString());
+        selfBody.setTextColor(GuardService.running ? Ui.TEXT_DIM : Ui.ACCENT);
+    }
+
+    private String ok(boolean b) {
+        return b ? "✓" : "✗";
+    }
+
+    private String formatTs(long epochMs) {
+        return new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
+                .format(new java.util.Date(epochMs));
+    }
+
+    /** M1 只读状态，不接无障碍；M2 装上 AccessibilityService 后这里会自动变 ✓。 */
+    private boolean accessibilityOk() {
+        try {
+            String s = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (s == null) return false;
+            String pkg = getPackageName().toLowerCase(java.util.Locale.US);
+            return s.toLowerCase(java.util.Locale.US).contains(pkg);
+        } catch (Throwable t) {
+            Log.e("nightguard", "read accessibility services failed", t);
+            return false;
+        }
+    }
+
+    private final Runnable selfTick = new Runnable() {
+        @Override public void run() {
+            refreshSelfCheck();
+            ui.postDelayed(this, 1000);
+        }
+    };
 
     // ------------------------------------------------------------------ 背景 / 连接
     private void pickBg() {

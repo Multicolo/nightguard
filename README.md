@@ -1,6 +1,10 @@
-# 守夜人 · NightGuard
+# 守夜鱼 · NightGuard
 
 一个「到点不让你熬夜」的 Android App + AstrBot 后端插件。
+
+> **下载 APK**：[GitHub Releases · 最新版](https://github.com/Multicolo/nightguard/releases/latest/download/NightGuard.apk)
+> **AstrBot 插件**：[astrbot_plugin_night_guard](https://github.com/Multicolo/astrbot_plugin_night_guard)
+> **源码**：[Multicolo/nightguard](https://github.com/Multicolo/nightguard)
 
 到了设定时间，手机会被盖上一层**关不掉的聊天框**，正在玩的 App 会被压到后台（**不杀进程**）；
 你可以跟你的 AstrBot 角色求情，她会按人设决定要不要放你几分钟——**一晚只放一次**；
@@ -13,7 +17,7 @@
 
 | 设置页 | 权限清单（每行可点进系统页） |
 | --- | --- |
-| ![设置页](docs/screenshots/lock-settings.png) | ![权限清单](docs/screenshots/permissions.png) |
+| ![设置页](docs/screenshots/main.png) | ![权限清单](docs/screenshots/permissions.png) |
 
 | 「想看你睡觉」会收到照片 | 聊久了会自己结束会话 |
 | --- | --- |
@@ -43,11 +47,12 @@ nightguard/
 │  ├─ java/com/nightguard/app/
 │  │  ├─ MainActivity.java  # 设置页 + 权限检查清单
 │  │  ├─ LockActivity.java  # 全屏聊天框（背景/气泡/求情/睡照/结束态）
-│  │  ├─ GuardService.java  # 前台服务，2 秒 tick，到点/亮屏就拉锁
+│  │  ├─ GuardService.java  # 前台服务 + 上锁闭环 + 自检观测
+│  │  ├─ Clock.java         # 统一时间源（服务器偏移 + 单调时钟，M5 接 /health）
 │  │  ├─ Cfg.java           # 本地配置与「今晚」状态
 │  │  ├─ Api.java / App.java# HTTP（可选信任自签证书）
 │  │  └─ BootReceiver.java
-│  └─ dist/NightGuard.apk   # 构建产物
+│  └─ (构建产物不提交：NightGuard.apk 见 GitHub Releases)
 └─ docs/
    ├─ PERMISSIONS.md       # 各品牌手机要开哪些权限、怎么进
    └─ BACKEND.md           # 后端部署（Docker / 裸机 / nginx / 反代）
@@ -69,6 +74,11 @@ nightguard/
 | 只发文字 | 系统提示硬规矩：拒绝语音/视频/生图请求，唯一例外是「想看你睡觉」 |
 | 睡照 | 命中关键词后调用生图服务商，用角色三视图当参考图；一晚只生成一张，重复请求直接复用 |
 | 会话结束 | 8 轮之后还在纠缠，模型可以用符合人设的话 `end=true`；之后输入框禁用，只回结束语 |
+| 上锁闭环 | 拉起锁屏后 500ms 回读 `LockActivity.lastAttachAt`；没打中重试 3 次，仍失败发高优先级「今晚守夜失败」通知 |
+| 异常可观测 | 自检页显示服务是否运行、tick 计数、上次成功上锁、最近失败原因/时间、悬浮窗/通知/电池/无障碍四项状态 |
+| 每晚就绪通知 | 22:00 后发一条「今晚 HH:MM 开始守夜」；服务死了就没有这条，本身就是信号 |
+| 时间窗硬上限 | 单晚最多 8 小时，超过直接拒绝保存 |
+| 统一时间源 | 时间窗、5 点换日、放行到期都走 `Clock`；M5 接上服务器时间后，改手机时间不再影响判断 |
 | 背景可换 | 设置页选本地图；不选就用后端 `/bg`（可配），后端没配就用内置渐变 |
 | 竖屏 / 平板 | 手机竖屏单列；`screenWidthDp ≥ 600` 自动变双栏（锁屏：左角色面板 + 右聊天；设置页：左右两栏，内容居中限宽） |
 
@@ -76,12 +86,31 @@ nightguard/
 
 ## 快速开始
 
+### 0. 下载并安装 APK
+
+- 最新版直链：[NightGuard.apk](https://github.com/Multicolo/nightguard/releases/latest/download/NightGuard.apk)
+- 全部版本：[Releases](https://github.com/Multicolo/nightguard/releases)
+
+```bash
+adb install -r NightGuard.apk
+```
+
+> v1.2.0 换了新的签名密钥。如果你装过 v1.1.0 或更早的版本，需要先卸载旧版再安装，否则会报签名不一致。
+> 手机端只装 APK，不需要装 Python；后端跑在 AstrBot 那边。
+
 ### 1. 部署后端（AstrBot 插件）
 
-把 `backend/astrbot_plugin_night_guard/` 整个目录放进 AstrBot 的插件目录：
+**推荐：插件市场安装。** AstrBot WebUI → 插件 → 插件市场，搜索「守夜鱼」或 `astrbot_plugin_night_guard`。
 
-- Docker 部署：宿主机 `.../astrbot-data/plugins/astrbot_plugin_night_guard/`（容器内 `/AstrBot/data/plugins/`）
-- 裸机部署：AstrBot 的 `data/plugins/astrbot_plugin_night_guard/`
+也可以手动装：
+
+```bash
+cd <AstrBot>/data/plugins
+git clone https://github.com/Multicolo/astrbot_plugin_night_guard
+```
+
+Docker 部署放在宿主机 `.../astrbot-data/plugins/astrbot_plugin_night_guard/`（容器内 `/AstrBot/data/plugins/`）。
+本仓库的 `backend/astrbot_plugin_night_guard/` 是开发源码；插件市场仓库与它保持同步。
 
 然后重启 AstrBot（Docker：`docker restart astrbot`）。插件会：
 
@@ -97,7 +126,7 @@ curl -H "X-Night-Token: <你的口令>" http://127.0.0.1:6200/health
 
 > 详细部署（Docker 端口、nginx 反代、HTTPS、开机自启）见 [docs/BACKEND.md](docs/BACKEND.md)。
 
-### 2. 编译 / 安装 APK
+### 2. 自己编译 APK（可选）
 
 ```powershell
 # Windows（需要 JDK 17 + Android SDK build-tools 34 + platform android-34 + Python 3）
@@ -130,8 +159,8 @@ adb install -r nightguard/android/dist/NightGuard.apk
 | 权限 | 必需性 | 作用 | 入口（App 内一点直达） |
 | --- | --- | --- | --- |
 | 显示在其他应用上层（悬浮窗） | **必需** | 后台把全屏锁屏界面顶上来 | 设置 → 应用 → 特殊权限 → 显示在其他应用上层 |
-| 通知（Android 13+） | **必需** | 前台服务常驻通知，否则服务会被系统掐 | 设置 → 通知 → 守夜人 |
-| 电池优化白名单 | 推荐 | 防止息屏/省电模式冻结守夜服务 | 设置 → 电池 → 电池优化 → 守夜人 → 不优化 |
+| 通知（Android 13+） | **必需** | 前台服务常驻通知，否则服务会被系统掐 | 设置 → 通知 → 守夜鱼 |
+| 电池优化白名单 | 推荐 | 防止息屏/省电模式冻结守夜服务 | 设置 → 电池 → 电池优化 → 守夜鱼 → 不优化 |
 | 自启动 / 后台弹出 | 推荐（国产 ROM） | 按 Home、清后台后仍能拉锁 | MIUI/HyperOS、EMUI/HarmonyOS、ColorOS、OriginOS 等各有页面，App 会自动尝试打开 |
 | 锁屏显示 / 后台弹出界面（部分 ROM） | 可选 | 锁屏状态下也能显示聊天框 | 各 ROM 的「应用管理 → 权限 → 锁屏显示」 |
 
@@ -221,6 +250,23 @@ docker logs -f astrbot | grep night_guard
 - 「会话结束」之后仍然锁到时间段结束（这是「关不掉」的代价）；用长按头像的后门退出。
 - 睡照依赖生图服务商；没配 key 时只会回文字，不会报错。
 - 通知/自启动等权限被厂商 ROM 管控，App 只能引导，不能代替用户点。
+
+## 更新日志
+
+### v1.2.0 · M1 上锁闭环
+
+- 上锁闭环：`LockActivity` 回写 `lastAttachAt`，`GuardService` 500ms 回读；未命中重试 3 次（间隔 1s），仍失败发高优先级「今晚守夜失败：<原因>」通知，并把原因写进自检页。
+- 修复四个静默失败出口：无悬浮窗权限、`settingsOpen` 卡死（10 分钟兜底复位）、息屏直接 return、`startForeground` 无 try/catch。
+- 新增自检区块：服务状态、tick 计数、上次成功上锁、最近失败原因/时间、悬浮窗/通知/电池/无障碍四项状态。
+- 新增 22:00「今晚 HH:MM 开始守夜」就绪通知；服务死了就没有这条通知。
+- 新增 `Clock` 统一时间源：时间窗、5 点换日、放行到期都不再直接读墙钟；M5 接服务器时间。
+- 时间窗硬上限 8 小时。
+- 息屏/亮屏：记录 `screenOffAt`，亮屏立刻上锁，不等下一个 tick。
+- 名称改为「守夜鱼」。
+
+### v1.1.0
+
+- 竖屏优先 UI；平板/横屏双栏；权限检查清单。
 
 ## License
 

@@ -3,9 +3,6 @@ package com.nightguard.app;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.Date;
 import java.util.Locale;
 
 /** 所有本地配置与今夜状态。分享版不含任何服务器/口令默认值，全部由用户自己填。 */
@@ -61,6 +58,15 @@ public final class Cfg {
     public static int startMin(Context c) { return sp(c).getInt("start", 23 * 60 + 30); }
     public static int endMin(Context c)   { return sp(c).getInt("end", 6 * 60 + 30); }
 
+    /** 单晚时间窗硬上限（分钟）。超过就拒绝保存，避免服务器时区误配把一整晚变成全天。 */
+    public static final int MAX_WINDOW_MIN = 8 * 60;
+
+    /** 时间窗长度（分钟）；开始==结束时按 0 处理，与 inWindow() 的「不生效」一致。 */
+    public static int windowMinutes(int startMin, int endMin) {
+        if (startMin == endMin) return 0;
+        return endMin > startMin ? endMin - startMin : 1440 - startMin + endMin;
+    }
+
     public static String formatMin(int m) {
         m = ((m % 1440) + 1440) % 1440;
         return String.format(Locale.US, "%02d:%02d", m / 60, m % 60);
@@ -78,23 +84,21 @@ public final class Cfg {
         }
     }
 
-    /** 当前分钟数。 */
+    /** 当前分钟数。走 Clock：本机墙钟 + 服务器偏移，M5 接上服务器时间后自动生效。 */
     public static int nowMin() {
-        Calendar c = Calendar.getInstance();
-        return c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE);
+        return Clock.nowMin();
     }
 
     public static boolean inWindow(Context c) {
-        int n = nowMin(), s = startMin(c), e = endMin(c);
+        int n = Clock.nowMin(), s = startMin(c), e = endMin(c);
         if (s == e) return false;
         if (s < e) return n >= s && n < e;
         return n >= s || n < e; // 跨零点
     }
 
-    /** 与后端一致的「今晚」标识：凌晨 5 点前算前一天。 */
+    /** 与后端一致的「今晚」标识：凌晨 5 点前算前一天。走 Clock，M5 接上服务器时间后与后端对齐。 */
     public static String nightKey() {
-        long t = System.currentTimeMillis() - 5L * 3600_000L;
-        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(t));
+        return Clock.nightKey();
     }
 
     public static long releasedUntil(Context c) { return sp(c).getLong("releasedUntil", 0L); }
