@@ -21,7 +21,8 @@
 
 ## 安装
 
-**插件市场（推荐）**：AstrBot WebUI → 插件 → 插件市场，搜索「守夜鱼」或 `astrbot_plugin_night_guard`。
+**插件市场（收录后）**：AstrBot WebUI → 插件 → 插件市场，搜索「守夜鱼」或 `astrbot_plugin_night_guard`。
+收录有审核延迟；搜不到就直接用手动方式。
 
 **手动**：
 

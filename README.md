@@ -100,7 +100,8 @@ adb install -r NightGuard.apk
 
 ### 1. 部署后端（AstrBot 插件）
 
-**推荐：插件市场安装。** AstrBot WebUI → 插件 → 插件市场，搜索「守夜鱼」或 `astrbot_plugin_night_guard`。
+**插件市场安装（收录后）**：AstrBot WebUI → 插件 → 插件市场，搜索「守夜鱼」或 `astrbot_plugin_night_guard`。
+如果暂时搜不到，用下面的手动方式（市场收录有审核延迟）。
 
 也可以手动装：
 
