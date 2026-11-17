@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">守夜鱼</string>
+    <string name="accessibility_label">守夜鱼 · 到点拉回锁屏</string>
+    <string name="accessibility_desc">只读取当前前台应用的包名和窗口变化，用来在守夜时段把锁屏界面拉回来；不读取屏幕文字，不读取输入框内容。</string>
 </resources>

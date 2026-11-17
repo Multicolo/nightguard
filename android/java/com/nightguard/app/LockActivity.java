@@ -17,6 +17,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
@@ -216,7 +217,7 @@ public class LockActivity extends Activity {
         holder.addView(iv, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         int inset = Ui.dp(this, 3);
         holder.setPadding(inset, inset, inset, inset);
-        holder.setOnLongClickListener(backdoor());
+        holder.setOnTouchListener(holdExit());
         holder.setLayoutParams(new FrameLayout.LayoutParams(Ui.dp(this, sizeDp), Ui.dp(this, sizeDp)));
         return holder;
     }
@@ -232,14 +233,14 @@ public class LockActivity extends Activity {
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(Ui.dp(this, 12), 0, 0, 0);
-        titles.setOnLongClickListener(backdoor());
+        titles.setOnTouchListener(holdExit());
 
         nameView = new TextView(this);
         nameView.setText(persona);
         nameView.setTextColor(Ui.TEXT);
         nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         nameView.setTypeface(Typeface.DEFAULT_BOLD);
-        nameView.setOnLongClickListener(backdoor());
+        nameView.setOnTouchListener(holdExit());
 
         statusChip = statusText(11);
         statusChip.setPadding(0, Ui.dp(this, 3), 0, 0);
@@ -271,7 +272,7 @@ public class LockActivity extends Activity {
         nameView.setTypeface(Typeface.DEFAULT_BOLD);
         nameView.setGravity(Gravity.CENTER);
         nameView.setPadding(0, Ui.dp(this, 18), 0, 0);
-        nameView.setOnLongClickListener(backdoor());
+        nameView.setOnTouchListener(holdExit());
         panel.addView(nameView);
 
         TextView sub = new TextView(this);
@@ -408,15 +409,44 @@ public class LockActivity extends Activity {
         return t;
     }
 
-    private View.OnLongClickListener backdoor() {
-        return new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) {
-                Toast.makeText(LockActivity.this, "别告诉她……", Toast.LENGTH_SHORT).show();
-                startActivity(new Intent(LockActivity.this, MainActivity.class)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return true;
+    /**
+     * 锁屏内唯一明写的退出：长按标题/头像 10 秒 → 4 位 PIN → 只停今晚。
+     * 不做隐藏手势，不直接跳设置页。
+     */
+    private View.OnTouchListener holdExit() {
+        return new View.OnTouchListener() {
+            private final Runnable fire = new Runnable() {
+                @Override public void run() { onExitHold(); }
+            };
+
+            @Override public boolean onTouch(View v, MotionEvent e) {
+                int action = e.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    v.setAlpha(0.6f);
+                    UI.postDelayed(fire, 10_000L);
+                } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    v.setAlpha(1f);
+                    UI.removeCallbacks(fire);
+                }
+                return false;
             }
         };
+    }
+
+    private void onExitHold() {
+        if (Pin.locked(this)) {
+            long min = (Pin.lockRemainingMs(this) + 59_999L) / 60_000L;
+            Toast.makeText(this, "PIN 错误次数过多，" + min + " 分钟后再试", Toast.LENGTH_LONG).show();
+            return;
+        }
+        PinPrompt.showVerify(this, new Runnable() {
+            @Override public void run() {
+                Cfg.setStoppedTonight(LockActivity.this, true);
+                Toast.makeText(LockActivity.this, "今晚守夜已停止，明晚照常", Toast.LENGTH_LONG).show();
+                stopService(new Intent(LockActivity.this, GuardService.class));
+                finish();
+            }
+        });
     }
 
     private void hideBars() {

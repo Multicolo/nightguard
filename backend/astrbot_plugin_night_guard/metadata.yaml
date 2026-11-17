@@ -5,7 +5,6 @@ desc: 守夜鱼（NightGuard）的 AstrBot 后端。到点后手机被全屏聊�
 version: v1.2.1
 author: 花影落闲庭
 repo: https://github.com/Multicolo/astrbot_plugin_night_guard
-astrbot_version: ">=4.16"
 tags:
   - 守夜
   - 睡眠

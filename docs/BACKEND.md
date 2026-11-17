@@ -8,6 +8,55 @@
 
 ---
 
+## 0. 手机连不上服务器时
+
+按顺序查，基本 1–5 步就能定位：
+
+1. **插件是否加载**：
+
+   ```bash
+   docker logs --tail 200 astrbot | grep -i night_guard
+   ```
+
+   应出现 `night_guard: 守夜后端已监听 0.0.0.0:6200`。没有就是插件没装、没启用，或加载报错。
+
+2. **端口是否映射到宿主机**：
+
+   ```bash
+   docker port astrbot | grep 6200
+   ```
+
+   没输出就在 `docker-compose.yml` 加 `ports: ["6200:6200"]`（或 `127.0.0.1:6200:6200`），然后 `docker compose up -d`。
+
+3. **容器内服务是否正常**：
+
+   ```bash
+   docker exec astrbot curl -i -H "X-Night-Token: <token>" http://127.0.0.1:6200/health
+   ```
+
+4. **手机/电脑是否能到宿主机**：
+
+   ```bash
+   curl -i http://<服务器局域网IP>:6200/health
+   ```
+
+   返回 `401` 也算通（说明到了服务，只是 token 缺/错）；连接超时才是端口、防火墙或不同网段。
+
+5. **token 从哪来**：
+
+   ```bash
+   docker exec astrbot cat /AstrBot/data/plugin_data/astrbot_plugin_night_guard/token.txt
+   ```
+
+6. **App 里服务器地址只填到根**：`http://192.168.1.10:6200` 或 `https://你的域名/night`，
+   不要带 `/health`，也不要填 `127.0.0.1`（那在手机上指手机自己）。
+7. **HTTPS 自签**：App 里勾「信任自签证书」；公网建议正规证书 + nginx 反代。
+8. **内网穿透 / VPN**：确认手机和服务器走的是同一条网络。
+
+App 的「测试连接」会区分：解析失败 / 连不上 / 超时 / TLS 证书 / HTTP 401 / HTTP 404。
+
+---
+
 ## 1. 放插件
 
 | 部署方式 | 插件目录 |

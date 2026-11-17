@@ -106,6 +106,16 @@ public final class Cfg {
     public static boolean grantedTonight(Context c) { return nightKey().equals(releasedNight(c)); }
     public static boolean endedTonight(Context c) { return nightKey().equals(sp(c).getString("endedNight", "")); }
 
+    /** PIN 紧急退出只停当晚：记录「今晚」标识，次日自动失效。 */
+    public static boolean stoppedTonight(Context c) {
+        return nightKey().equals(sp(c).getString("stoppedNight", ""));
+    }
+
+    public static void setStoppedTonight(Context c, boolean stopped) {
+        if (stopped) sp(c).edit().putString("stoppedNight", nightKey()).apply();
+        else sp(c).edit().remove("stoppedNight").apply();
+    }
+
     public static String bgPath(Context c) { return sp(c).getString("bg", ""); }
     public static String history(Context c) { return sp(c).getString("history", "[]"); }
 }

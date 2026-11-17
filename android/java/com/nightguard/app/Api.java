@@ -82,4 +82,28 @@ public final class Api {
         if (s.trim().isEmpty()) return new JSONObject();
         return new JSONObject(s);
     }
+
+    /** 把常见网络异常翻译成可执行的排查提示，直接显示在设置页。 */
+    public static String describe(Throwable t) {
+        if (t == null) return "未知错误";
+        if (t instanceof java.net.UnknownHostException) {
+            return "域名/IP 解析失败：检查服务器地址和手机网络";
+        }
+        if (t instanceof java.net.ConnectException) {
+            return "连不上服务器：端口没映射、防火墙拦截，或手机不在同一局域网";
+        }
+        if (t instanceof java.net.SocketTimeoutException) {
+            return "连接超时：服务器没响应，检查端口映射 / nginx 反代";
+        }
+        if (t instanceof javax.net.ssl.SSLException) {
+            return "TLS 证书被拒绝：自签证书请勾「信任自签证书」，或改用 https";
+        }
+        String m = t.getMessage();
+        if (m == null || m.isEmpty()) m = t.getClass().getSimpleName();
+        if (m.contains("HTTP 401")) return "口令不对（HTTP 401）：检查 api_token";
+        if (m.contains("HTTP 404")) {
+            return "路径不对（HTTP 404）：服务器地址不要带 /health，nginx 子路径要匹配";
+        }
+        return m;
+    }
 }

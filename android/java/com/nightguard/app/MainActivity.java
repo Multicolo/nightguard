@@ -43,10 +43,11 @@ public class MainActivity extends Activity {
     private CheckBox cbInsecure;
     private TextView statusTitle, statusSub, statusDot;
     private LinearLayout statusCard;
-    private View permOverlay, permNotif, permBatt, permAuto;
-    private TextView permOverlayMark, permNotifMark, permBattMark, permAutoMark;
+    private View permOverlay, permNotif, permBatt, permAuto, permAccess;
+    private TextView permOverlayMark, permNotifMark, permBattMark, permAutoMark, permAccessMark;
     private TextView bgNote;
     private TextView selfBody;
+    private boolean pinDialogShowing;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean wide;
 
@@ -64,6 +65,7 @@ public class MainActivity extends Activity {
         refreshStatus();
         refreshPerms();
         refreshSelfCheck();
+        ensurePin();
         ui.removeCallbacks(selfTick);
         ui.post(selfTick);
     }
@@ -199,6 +201,8 @@ public class MainActivity extends Activity {
             r.addView(gap(14));
             r.addView(actionCard());
             r.addView(gap(14));
+            r.addView(advancedCard());
+            r.addView(gap(14));
             r.addView(aboutCard());
             body.addView(left, new LinearLayout.LayoutParams(0, -1, 1f));
             LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(0, -1, 1f);
@@ -218,6 +222,8 @@ public class MainActivity extends Activity {
             col.addView(permissionCard());
             col.addView(gap(14));
             col.addView(actionCard());
+            col.addView(gap(14));
+            col.addView(advancedCard());
             col.addView(gap(14));
             col.addView(aboutCard());
             body.addView(sc, new LinearLayout.LayoutParams(-1, -1));
@@ -255,7 +261,7 @@ public class MainActivity extends Activity {
         titles.addView(sub);
         bar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        TextView badge = text("v1.2.1", 11, Ui.ACCENT);
+        TextView badge = text("v1.3.0", 11, Ui.ACCENT);
         badge.setBackground(Ui.roundStroke(this, 0x1AFF6FA5, 999, 0x33FF6FA5, 0.8f));
         badge.setPadding(dp(10), dp(4), dp(10), dp(4));
         bar.addView(badge);
@@ -393,6 +399,11 @@ public class MainActivity extends Activity {
         c.addView(permNotif);
         c.addView(permSep());
 
+        permAccess = permRow("无障碍服务", "必需 · 窗口变化时立刻拉回锁屏");
+        permAccessMark = (TextView) permAccess.getTag();
+        c.addView(permAccess);
+        c.addView(permSep());
+
         permBatt = permRow("电池优化白名单", "推荐 · 防止息屏后服务被冻结");
         permBattMark = (TextView) permBatt.getTag();
         c.addView(permBatt);
@@ -407,6 +418,9 @@ public class MainActivity extends Activity {
         });
         permNotif.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { openNotif(); }
+        });
+        permAccess.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { openAccessibility(); }
         });
         permBatt.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { openBattery(); }
@@ -516,6 +530,35 @@ public class MainActivity extends Activity {
         return c;
     }
 
+    private View advancedCard() {
+        LinearLayout c = card();
+        c.addView(sectionTitle("紧急退出 / 白名单"));
+
+        TextView hint = small("锁屏里长按标题或头像 10 秒，输入 4 位 PIN，只停今晚；"
+                + "时间窗和历史都不变。白名单里的 App 不会被立刻拉回。");
+        hint.setPadding(0, dp(6), 0, dp(12));
+        c.addView(hint);
+
+        TextView white = secondary("后台拉回白名单");
+        white.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, WhitelistActivity.class));
+            }
+        });
+        c.addView(white);
+
+        c.addView(gap(10));
+
+        TextView pin = secondary(Pin.isSet(this) ? "修改紧急退出 PIN" : "设置紧急退出 PIN");
+        pin.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                PinPrompt.showSetup(MainActivity.this, true, null);
+            }
+        });
+        c.addView(pin);
+        return c;
+    }
+
     private View aboutCard() {
         LinearLayout c = card();
         c.addView(sectionTitle("聊天框背景"));
@@ -535,7 +578,7 @@ public class MainActivity extends Activity {
 
         c.addView(divider());
         c.addView(small("守夜期间打电话、解锁都正常。要停只能回这个 App 点「停止守夜」，"
-                + "或在锁屏左上角长按头像。"));
+                + "或在锁屏长按标题/头像 10 秒，输入紧急退出 PIN。"));
         return c;
     }
 
@@ -567,20 +610,26 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "单晚最多 8 小时", Toast.LENGTH_LONG).show();
             return;
         }
-        Cfg.sp(this).edit()
+        android.content.SharedPreferences.Editor ed = Cfg.sp(this).edit()
                 .putString("server", server)
                 .putString("token", etToken.getText().toString().trim())
                 .putBoolean("insecure_tls", cbInsecure.isChecked())
                 .putInt("start", s)
                 .putInt("end", e)
-                .putBoolean("enabled", start)
-                .apply();
+                .putBoolean("enabled", start);
+        if (start) ed.remove("stoppedNight");
+        ed.apply();
+        if (start) Maintenance.clear(this);
         if (start) {
             if (server.isEmpty() || etToken.getText().toString().trim().isEmpty()) {
                 Toast.makeText(this, "服务器地址或口令是空的，守夜连不上后端", Toast.LENGTH_LONG).show();
             }
             if (!hasOverlay()) {
                 Toast.makeText(this, "还没给「悬浮窗」权限，到点会锁不住", Toast.LENGTH_LONG).show();
+            }
+            if (!accessibilityOk()) {
+                Toast.makeText(this, "还没开「无障碍服务」，掉出锁屏后只能靠 2 秒轮询拉回",
+                        Toast.LENGTH_LONG).show();
             }
             Intent i = new Intent(this, GuardService.class);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
@@ -630,6 +679,15 @@ public class MainActivity extends Activity {
                     .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
         } catch (Throwable t) {
             Toast.makeText(this, "设置 → 通知 → 找到「守夜鱼」打开", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openAccessibility() {
+        try {
+            startActivity(AccessibilityConfig.settingsIntent(this));
+        } catch (Throwable t) {
+            Log.e("nightguard", "open accessibility settings failed", t);
+            Toast.makeText(this, "设置 → 无障碍 → 已安装的服务 → 守夜鱼", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -683,6 +741,7 @@ public class MainActivity extends Activity {
         if (permOverlayMark == null) return;
         setMark(permOverlayMark, hasOverlay(), true);
         setMark(permNotifMark, hasNotif(), true);
+        setMark(permAccessMark, accessibilityOk(), true);
         setMark(permBattMark, batteryOk(), false);
         setMark(permAutoMark, false, false);
     }
@@ -697,7 +756,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ------------------------------------------------------------------ 自检
+    // ------------------------------------------------------------------ 自检 / PIN
+    private void ensurePin() {
+        if (Pin.isSet(this) || pinDialogShowing) return;
+        pinDialogShowing = true;
+        PinPrompt.showSetup(this, false, new Runnable() {
+            @Override public void run() { pinDialogShowing = false; }
+        });
+    }
+
     private void refreshSelfCheck() {
         if (selfBody == null) return;
         String reason = GuardService.lastFailReason;
@@ -717,6 +784,14 @@ public class MainActivity extends Activity {
                 .append(lockAt > 0 ? formatTs(lockAt) : "还没有");
         sb.append('\n').append("最近失败：").append(reason == null || reason.isEmpty() ? "无" : reason);
         if (failAt > 0) sb.append(" · ").append(formatTs(failAt));
+        int mc = Maintenance.count(this);
+        if (Maintenance.active(this)) {
+            long rem = Maintenance.remainingMs(this);
+            sb.append('\n').append("维护模式：剩余 ").append((rem + 59_999L) / 60_000L)
+                    .append(" 分钟 · 今晚第 ").append(mc).append(" 次");
+        } else if (mc > 0) {
+            sb.append('\n').append("今晚维护模式：").append(mc).append(" 次");
+        }
         sb.append('\n').append("悬浮窗 ").append(ok(hasOverlay()))
                 .append("   通知 ").append(ok(hasNotif()))
                 .append("   电池 ").append(ok(batteryOk()))
@@ -734,18 +809,9 @@ public class MainActivity extends Activity {
                 .format(new java.util.Date(epochMs));
     }
 
-    /** M1 只读状态，不接无障碍；M2 装上 AccessibilityService 后这里会自动变 ✓。 */
+    /** M2：无障碍服务已启用才算 ✓；只读系统状态，不读屏幕内容。 */
     private boolean accessibilityOk() {
-        try {
-            String s = Settings.Secure.getString(getContentResolver(),
-                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (s == null) return false;
-            String pkg = getPackageName().toLowerCase(java.util.Locale.US);
-            return s.toLowerCase(java.util.Locale.US).contains(pkg);
-        } catch (Throwable t) {
-            Log.e("nightguard", "read accessibility services failed", t);
-            return false;
-        }
+        return AccessibilityConfig.isEnabled(this);
     }
 
     private final Runnable selfTick = new Runnable() {
@@ -811,7 +877,7 @@ public class MainActivity extends Activity {
                             + " · 今晚" + (c.optBoolean("granted") ? "已放行过" : "还没放行")
                             + (c.optBoolean("ended") ? " · 会话已结束" : "");
                 } catch (Throwable t) {
-                    msg = "连接失败：" + t.getMessage();
+                    msg = "连接失败：" + Api.describe(t);
                 }
                 final String m = msg;
                 ui.post(new Runnable() {
@@ -832,7 +898,9 @@ public class MainActivity extends Activity {
         boolean granted = Cfg.grantedTonight(this);
         boolean ended = Cfg.endedTonight(this);
 
-        statusTitle.setText(enabled ? "守夜进行中" : "守夜未开启");
+        statusTitle.setText(enabled
+                ? (Cfg.stoppedTonight(this) ? "今晚已停止守夜" : "守夜进行中")
+                : "守夜未开启");
         StringBuilder sb = new StringBuilder();
         sb.append(win ? "现在在时段内" : "现在不在时段内");
         if (!Cfg.configured(this)) sb.append(" · 还没配置服务器");

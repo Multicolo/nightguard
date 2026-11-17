@@ -37,6 +37,9 @@ public class GuardService extends Service {
     public static volatile String lastFailReason = "";
     public static volatile long lastFailAt = 0L;
 
+    private static volatile GuardService INSTANCE;
+    private int failStreak;
+
     private static final String CH = "guard";
     private static final String CH_READY = "guard_ready";
     private static final String CH_FAIL = "guard_fail";
@@ -86,6 +89,7 @@ public class GuardService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         running = true;
+        INSTANCE = this;
         loadFailState();
         createChannels();
         try {
@@ -119,6 +123,19 @@ public class GuardService extends Service {
     public static void setSettingsOpen(boolean open) {
         settingsOpen = open;
         settingsOpenAt = open ? SystemClock.elapsedRealtime() : 0L;
+    }
+
+    /** 无障碍服务拉回时调用；服务不在就返回 false，让调用方直接 startActivity。 */
+    public static boolean requestLockNow() {
+        GuardService s = INSTANCE;
+        if (s == null) return false;
+        s.h.post(new Runnable() {
+            @Override public void run() {
+                GuardService cur = INSTANCE;
+                if (cur != null) cur.startLockRound();
+            }
+        });
+        return true;
     }
 
     private void createChannels() {
@@ -196,6 +213,13 @@ public class GuardService extends Service {
             return;
         }
 
+        // PIN 只停今晚：服务可能被开机/看门狗拉起来，这里再兜一层。
+        if (Cfg.stoppedTonight(this)) {
+            cancelLockRound();
+            if (LockActivity.alive()) LockActivity.closeNow();
+            return;
+        }
+
         maybeNotifyTonight();
 
         if (settingsOpen) {
@@ -220,6 +244,26 @@ public class GuardService extends Service {
             return;
         }
         if (Cfg.endedTonight(this) && LockActivity.alive()) return;
+
+        // 维护模式：暂停拉回，让用户能进设置修权限/无障碍。
+        if (Maintenance.active(this)) {
+            cancelLockRound();
+            if (LockActivity.alive()) LockActivity.closeNow();
+            return;
+        }
+
+        // 无障碍被关：M2 的快速拉回失效。报警并进 5 分钟维护模式（每晚上限 2 次）。
+        if (!AccessibilityConfig.isEnabled(this)) {
+            boolean paused = Maintenance.enter(this, "ACCESSIBILITY_OFF");
+            if (paused) {
+                Notifier.maintenance(this, "无障碍服务未开启，已暂停拉回 5 分钟（今晚第 "
+                        + Maintenance.count(this) + " 次）。去设置里打开「守夜鱼」。");
+                cancelLockRound();
+                if (LockActivity.alive()) LockActivity.closeNow();
+                return;
+            }
+            Notifier.maintenance(this, "无障碍服务仍未开启，今晚维护模式次数已用完；守夜会继续尝试拉回并报警。");
+        }
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         boolean interactive = pm == null || pm.isInteractive();
@@ -276,6 +320,7 @@ public class GuardService extends Service {
         if (roundActive) return;
         if (!Cfg.enabled(this) || !Cfg.inWindow(this)) return;
         if (Cfg.releasedUntil(this) > Clock.now()) return;
+        if (Cfg.stoppedTonight(this) || Maintenance.active(this)) return;
         if (LockActivity.alive()) {
             lastLockAt = Clock.now();
             return;
@@ -314,6 +359,7 @@ public class GuardService extends Service {
         if (heartbeat || LockActivity.alive()) {
             roundActive = false;
             nextRoundAt = 0L;
+            failStreak = 0;
             lastLockAt = Clock.now();
             Cfg.sp(this).edit().putLong(K_LAST_LOCK, lastLockAt).apply();
             Log.i("nightguard", "lock attached on attempt " + roundAttempt
@@ -332,14 +378,25 @@ public class GuardService extends Service {
         String reason = roundReason != null ? roundReason : "ATTACH_TIMEOUT";
         recordFail(reason);
         alarmFail(reason);
+        failStreak++;
+        if (failStreak >= 3) {
+            failStreak = 0;
+            boolean paused = Maintenance.enter(this, "LOCK_FAILED");
+            Notifier.maintenance(this, paused
+                    ? "连续 3 次上锁失败，已暂停拉回 5 分钟（今晚第 "
+                    + Maintenance.count(this) + " 次）。"
+                    : "连续上锁失败，今晚维护模式次数已用完；继续尝试并报警。");
+        }
     }
 
     private final Runnable retryRunnable = new Runnable() {
         @Override public void run() {
             if (!roundActive) return;
             if (!Cfg.enabled(GuardService.this) || !Cfg.inWindow(GuardService.this)
-                    || Cfg.releasedUntil(GuardService.this) > Clock.now()) {
-                Log.e("nightguard", "lock retry aborted: guard off, window closed or released");
+                    || Cfg.releasedUntil(GuardService.this) > Clock.now()
+                    || Cfg.stoppedTonight(GuardService.this)
+                    || Maintenance.active(GuardService.this)) {
+                Log.e("nightguard", "lock retry aborted: guard off, stopped, window closed or released");
                 cancelLockRound();
                 return;
             }
@@ -489,6 +546,7 @@ public class GuardService extends Service {
             if (!Cfg.enabled(GuardService.this)) return;
             if (!Cfg.inWindow(GuardService.this)) return;
             if (Cfg.releasedUntil(GuardService.this) > Clock.now()) return;
+            if (Cfg.stoppedTonight(GuardService.this) || Maintenance.active(GuardService.this)) return;
             if (LockActivity.alive()) return;
             startLockRound();
         }
@@ -497,6 +555,7 @@ public class GuardService extends Service {
     @Override public void onDestroy() {
         running = false;
         roundActive = false;
+        INSTANCE = null;
         h.removeCallbacksAndMessages(null);
         try {
             unregisterReceiver(screenReceiver);
