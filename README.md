@@ -1,5 +1,10 @@
 # 守夜鱼 · NightGuard
 
+> **手机端 IP 怎么填**：App 里填的是**运行 AstrBot 的服务器局域网 IP**，不是手机自己的 IP。
+> 例：`http://192.168.1.100:6200` 或 `https://你的域名/night`；不要填 `127.0.0.1`，不要带 `/health`。
+> 服务器 IP 用 `ipconfig`（Windows）/ `ip addr`（Linux）查；手机自己的 IP 在「设置 → WLAN → 当前网络」里看（只用于排查/防火墙）。
+> 手机和服务器必须在同一 Wi-Fi / 局域网；公网访问要 nginx + HTTPS。
+
 一个「到点不让你熬夜」的 Android App + AstrBot 后端插件。
 
 > **下载 APK**：[GitHub Releases · 最新版](https://github.com/Multicolo/nightguard/releases/latest/download/NightGuard.apk)

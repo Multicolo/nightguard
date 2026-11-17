@@ -1,8 +1,18 @@
+# ============================================================================
+# 手机端 IP 怎么填（App → 设置页 → 服务器地址）
+# ----------------------------------------------------------------------------
+# 填「运行 AstrBot 的那台机器」的局域网 IP，不是手机自己的 IP。
+# 例：http://192.168.1.100:6200   或   https://你的域名/night
+# 不要填 127.0.0.1 / localhost（在手机上指手机自己）；不要带 /health。
+# 手机和服务器必须在同一 Wi-Fi / 局域网。
+# 查服务器 IP：Windows 用 ipconfig；Linux 用 ip addr。
+# 查手机自己的 IP：设置 → WLAN → 当前网络 → IP 地址（仅排查/防火墙用）。
+# ============================================================================
 name: astrbot_plugin_night_guard
 display_name: 守夜鱼 NightGuard
 short_desc: 到点把手机盖成关不掉的聊天框，陪你和 AstrBot 角色求情睡觉。
 desc: 守夜鱼（NightGuard）的 AstrBot 后端。到点后手机被全屏聊天框盖住，只能跟你的 AstrBot 角色求情；一晚只放行一次，可以求一张「准备睡觉」的照片，聊久了会自己结束会话。人设读取 AstrBot 默认人设，也可以关掉用通用人设。需要配合 Android App 使用：https://github.com/Multicolo/nightguard/releases/latest/download/NightGuard.apk
-version: v1.2.1
+version: v1.3.0
 author: 花影落闲庭
 repo: https://github.com/Multicolo/astrbot_plugin_night_guard
 tags:

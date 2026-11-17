@@ -2,6 +2,10 @@
 
 <img src="logo.png" width="96" align="right" alt="守夜鱼">
 
+> **手机端 IP 怎么填**：App 的「服务器地址」填**运行 AstrBot 的服务器局域网 IP**，不是手机 IP。
+> 例：`http://192.168.1.100:6200` 或 `https://你的域名/night`；不要填 `127.0.0.1`，不要带 `/health`。
+> 手机 IP 在「设置 → WLAN → 当前网络」里看，只用于排查/防火墙。
+
 到点把手机盖成**关不掉的聊天框**，只能跟你的 AstrBot 角色求情睡觉。
 
 这是守夜鱼的后端插件：它不接管 bot 的聊天，只额外开一个 HTTP 服务给 Android App 用。
