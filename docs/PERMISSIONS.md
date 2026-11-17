@@ -36,11 +36,39 @@ adb shell appops get com.nightguard.app SYSTEM_ALERT_WINDOW   # 确认
 ## 3. 无障碍服务 —— **必需（M2）**
 
 M2 起用它监听 `TYPE_WINDOW_STATE_CHANGED`，只读前台应用包名，**不读屏幕文字、不读输入框**
-（服务配置里 `canRetrieveWindowContent=false`）。被关闭时会报警并进入 5 分钟维护模式。
+（服务配置里 `canRetrieveWindowContent=false`）。开过又被关闭时会报警并进入 5 分钟维护模式。
 
 - App 内：设置页 →「无障碍服务」→ 跳到系统页面，找到「守夜鱼 · 到点拉回锁屏」打开。
 - 手动：**设置 → 无障碍 → 已安装的服务 → 守夜鱼 → 开启**（各 ROM 路径略有不同）。
 - 关闭后：通知栏会出现「守夜已降级」，按提示回去重新打开。
+
+### 开关是灰的，提示「受限制的设置」
+
+Android 13 起，**不是从应用商店安装的 APK**（侧载）默认不允许开无障碍，这是系统安全策略，
+不是安装坏了。表现：开关灰色，提示「出于安全考虑，此设置目前不可用」。
+
+按顺序试：
+
+1. **允许受限制的设置**
+   - 设置 → 应用 → 守夜鱼 → 应用信息
+   - 右上角 **⋮** →「允许受限制的设置」（小米/HyperOS 可能在「高级设置」里；
+     ColorOS/OriginOS/One UI 菜单措辞略有不同）
+   - 确认后回到无障碍页，再开一次；仍灰就重启手机再试。
+2. **用 ADB 安装**
+   用系统文件管理器点 APK 安装会被标记为不可信来源；改用 ADB 安装通常不会触发这层限制：
+
+   ```bash
+   adb install -r NightGuard.apk
+   ```
+
+3. **ADB 直接放开**
+   ```bash
+   adb shell cmd appops set com.nightguard.app ACCESS_RESTRICTED_SETTINGS allow
+   adb shell cmd appops get com.nightguard.app | grep -i restricted   # 确认
+   ```
+   然后再回无障碍页开启。
+
+如果应用信息里没有「允许受限制的设置」，优先用第 2/3 步。
 
 ## 4. 电池优化白名单 —— 推荐
 
