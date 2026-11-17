@@ -8,7 +8,18 @@ import android.util.Log;
 
 /** 只读无障碍服务状态；不读屏幕内容。 */
 public final class AccessibilityConfig {
+    private static final String K_EVER = "accessibility_ever";
+
     private AccessibilityConfig() {}
+
+    /** 曾经成功连上过无障碍服务：只有「开过又被关」才进维护模式，避免新用户没开过就被暂停。 */
+    public static boolean everEnabled(Context c) {
+        return Cfg.sp(c).getBoolean(K_EVER, false);
+    }
+
+    public static void markEverEnabled(Context c) {
+        Cfg.sp(c).edit().putBoolean(K_EVER, true).apply();
+    }
 
     public static ComponentName component(Context c) {
         return new ComponentName(c, NightGuardAccessibilityService.class);

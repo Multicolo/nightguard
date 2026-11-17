@@ -252,17 +252,22 @@ public class GuardService extends Service {
             return;
         }
 
-        // 无障碍被关：M2 的快速拉回失效。报警并进 5 分钟维护模式（每晚上限 2 次）。
+        // 无障碍被关：M2 的快速拉回失效。曾经开过才进维护模式；从没开过就只报警，继续用 2 秒兜底。
         if (!AccessibilityConfig.isEnabled(this)) {
-            boolean paused = Maintenance.enter(this, "ACCESSIBILITY_OFF");
-            if (paused) {
-                Notifier.maintenance(this, "无障碍服务未开启，已暂停拉回 5 分钟（今晚第 "
-                        + Maintenance.count(this) + " 次）。去设置里打开「守夜鱼」。");
-                cancelLockRound();
-                if (LockActivity.alive()) LockActivity.closeNow();
-                return;
+            if (!AccessibilityConfig.everEnabled(this)) {
+                Notifier.degraded(this, "无障碍服务未开启：快速拉回不可用，目前靠 2 秒轮询兜底。"
+                        + "去设置里打开「守夜鱼」可让切出应用后立刻拉回。");
+            } else {
+                boolean paused = Maintenance.enter(this, "ACCESSIBILITY_OFF");
+                if (paused) {
+                    Notifier.maintenance(this, "无障碍服务未开启，已暂停拉回 5 分钟（今晚第 "
+                            + Maintenance.count(this) + " 次）。去设置里打开「守夜鱼」。");
+                    cancelLockRound();
+                    if (LockActivity.alive()) LockActivity.closeNow();
+                    return;
+                }
+                Notifier.maintenance(this, "无障碍服务仍未开启，今晚维护模式次数已用完；守夜会继续尝试拉回并报警。");
             }
-            Notifier.maintenance(this, "无障碍服务仍未开启，今晚维护模式次数已用完；守夜会继续尝试拉回并报警。");
         }
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);

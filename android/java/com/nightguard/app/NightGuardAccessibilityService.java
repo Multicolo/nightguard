@@ -48,6 +48,7 @@ public class NightGuardAccessibilityService extends AccessibilityService {
     @Override public void onServiceConnected() {
         super.onServiceConnected();
         connected = true;
+        AccessibilityConfig.markEverEnabled(this);
         AccessibilityServiceInfo info = getServiceInfo();
         if (info != null) {
             info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
